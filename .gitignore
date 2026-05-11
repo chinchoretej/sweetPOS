@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+.env
+.env.local
+.env.*.local
+.vite
+.DS_Store
+*.log
+coverage
+.idea
+.vscode/*
+!.vscode/extensions.json
+firebase-debug.log
+.firebase/
