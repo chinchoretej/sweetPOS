@@ -1,0 +1,75 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isCashier() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'cashier'];
+    }
+
+    // ---------- users ----------
+    // Users may read/write only their own profile.
+    // Admins can read/write any user (for role management).
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ---------- products ----------
+    // Anyone signed-in (cashier / admin) can read.
+    // Only admins can create / update / delete.
+    match /products/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------- customers ----------
+    match /customers/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isCashier();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- orders ----------
+    // Cashiers + admins can create. Once created, orders are immutable
+    // for cashiers; admins can edit / delete (refunds, corrections).
+    match /orders/{id} {
+      allow read: if isSignedIn();
+      allow create: if isCashier();
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- inventory_logs ----------
+    match /inventory_logs/{id} {
+      allow read: if isSignedIn();
+      allow create: if isCashier();
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- settings ----------
+    match /settings/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
