@@ -140,7 +140,7 @@ export default function Dashboard() {
       )}
 
       <div className="grid lg:grid-cols-3 gap-4">
-        <div className="card p-4 lg:col-span-2">
+        <div className="card p-3 sm:p-4 lg:col-span-2 overflow-hidden min-w-0">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold flex items-center gap-2">
               <Receipt className="w-4 h-4 text-brand-500" /> Recent Bills
@@ -162,31 +162,38 @@ export default function Dashboard() {
               }
             />
           ) : (
-            <div className="overflow-x-auto -mx-4">
-              <table className="min-w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500">
+            <div className="overflow-x-auto -mx-3 sm:-mx-4">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="text-[10px] sm:text-xs uppercase text-slate-500">
                   <tr>
-                    <th className="px-4 py-2 text-left">Invoice</th>
-                    <th className="px-4 py-2 text-left">Customer</th>
-                    <th className="px-4 py-2 text-left">When</th>
-                    <th className="px-4 py-2 text-left">Mode</th>
-                    <th className="px-4 py-2 text-right">Amount</th>
+                    <th className="px-2 sm:px-4 py-2 text-left">Invoice</th>
+                    <th className="px-2 sm:px-4 py-2 text-left">Customer</th>
+                    <th className="hidden sm:table-cell px-2 sm:px-4 py-2 text-left">When</th>
+                    <th className="hidden sm:table-cell px-2 sm:px-4 py-2 text-left">Mode</th>
+                    <th className="px-2 sm:px-4 py-2 text-right">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {orders.slice(0, 8).map((o) => (
                     <tr key={o.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="px-4 py-2 font-medium">
+                      <td className="px-2 sm:px-4 py-2 font-medium">
                         <Link to={`/orders/${o.id}`} className="text-brand-600 hover:underline">
                           {o.invoiceNumber}
                         </Link>
                       </td>
-                      <td className="px-4 py-2">{o.customer?.name || o.customer?.mobile || 'Walk-in'}</td>
-                      <td className="px-4 py-2 text-slate-500">{friendlyDate(o.createdAt)}</td>
-                      <td className="px-4 py-2">
+                      <td className="px-2 sm:px-4 py-2 max-w-[120px] sm:max-w-none truncate">
+                        {o.customer?.name || o.customer?.mobile || 'Walk-in'}
+                        <span className="block sm:hidden text-[10px] text-slate-500">
+                          {friendlyDate(o.createdAt)}
+                        </span>
+                      </td>
+                      <td className="hidden sm:table-cell px-2 sm:px-4 py-2 text-slate-500">
+                        {friendlyDate(o.createdAt)}
+                      </td>
+                      <td className="hidden sm:table-cell px-2 sm:px-4 py-2">
                         <Badge tone="info">{(o.paymentMode || '').toUpperCase()}</Badge>
                       </td>
-                      <td className="px-4 py-2 text-right font-semibold">
+                      <td className="px-2 sm:px-4 py-2 text-right font-semibold whitespace-nowrap">
                         {formatCurrency(o.total, settings.currency)}
                       </td>
                     </tr>
@@ -197,7 +204,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="card p-4">
+        <div className="card p-3 sm:p-4 overflow-hidden min-w-0">
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-500" /> Top Selling Sweets
           </h3>
@@ -209,14 +216,16 @@ export default function Dashboard() {
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
               {stats.topSelling.map((p, idx) => (
                 <li key={p.id} className="flex items-center gap-3 py-2.5">
-                  <span className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-600 grid place-items-center text-xs font-bold">
+                  <span className="w-7 h-7 shrink-0 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-600 grid place-items-center text-xs font-bold">
                     {idx + 1}
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{p.name}</p>
-                    <p className="text-xs text-slate-500">{p.category}</p>
+                    <p className="text-xs text-slate-500 truncate">{p.category}</p>
                   </div>
-                  <Badge tone="brand">{p.soldCount || 0} sold</Badge>
+                  <Badge tone="brand" className="shrink-0 whitespace-nowrap">
+                    {p.soldCount || 0} sold
+                  </Badge>
                 </li>
               ))}
             </ul>
