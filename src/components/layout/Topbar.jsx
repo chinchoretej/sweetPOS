@@ -2,6 +2,7 @@ import { Menu, Sun, Moon, LogOut, Languages } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useI18n } from '../../context/I18nContext';
+import { ROLE_LABEL } from '../../permissions/roles';
 
 export default function Topbar({ onOpenSidebar, title }) {
   const { theme, toggle } = useTheme();
@@ -59,7 +60,7 @@ export default function Topbar({ onOpenSidebar, title }) {
               <p className="font-semibold">
                 {user?.displayName || user?.email || user?.phoneNumber}
               </p>
-              <p className="text-slate-500 capitalize">{user?.role || 'user'}</p>
+              <p className="text-slate-500">{ROLE_LABEL[user?.role] || 'User'}</p>
             </div>
           </div>
           <button

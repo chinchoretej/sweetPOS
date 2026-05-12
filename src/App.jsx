@@ -1,5 +1,6 @@
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { AuthProvider } from './context/AuthContext';
+import { TenantProvider } from './context/TenantContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
@@ -13,9 +14,11 @@ export default function App() {
         <I18nProvider>
           <ToastProvider>
             <AuthProvider>
-              <SettingsProvider>
-                <AppRouter />
-              </SettingsProvider>
+              <TenantProvider>
+                <SettingsProvider>
+                  <AppRouter />
+                </SettingsProvider>
+              </TenantProvider>
             </AuthProvider>
           </ToastProvider>
         </I18nProvider>

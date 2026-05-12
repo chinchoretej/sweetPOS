@@ -13,46 +13,44 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { shopCol, shopDoc } from './paths';
 import { logInventoryChange } from './inventoryService';
 import { incrementCustomerStats, upsertCustomer } from './customerService';
 
 const COLL = 'orders';
 
-const generateInvoiceNumber = () => {
+const generateInvoiceNumber = (prefix = 'INV') => {
   const d = new Date();
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const rand = Math.floor(1000 + Math.random() * 9000);
-  return `INV${yy}${mm}${dd}-${rand}`;
+  return `${prefix}${yy}${mm}${dd}-${rand}`;
 };
 
 /**
- * Create an order atomically:
- *  - re-reads each product
- *  - validates stock
- *  - decrements stock
- *  - writes the order document
+ * Create an order atomically within the shop's subcollection.
  * Items: [{ productId, name, qty, unit, price, total }]
  */
-export const createOrder = async ({
+export const createOrder = async (shopId, {
   items,
   subtotal,
   discount,
   gst,
   total,
   paymentMode,
-  customer, // { mobile, name }
+  customer,
   cashierId,
   notes = '',
+  invoicePrefix = 'INV',
 }) => {
-  if (!db) throw new Error('Firebase not configured');
-  const invoiceNumber = generateInvoiceNumber();
-  const orderRef = doc(collection(db, COLL));
+  if (!shopId) throw new Error('shopId required');
+  const invoiceNumber = generateInvoiceNumber(invoicePrefix);
+  const orderRef = doc(collection(db, 'shops', shopId, COLL));
 
   await runTransaction(db, async (tx) => {
     const productSnaps = await Promise.all(
-      items.map((it) => tx.get(doc(db, 'products', it.productId)))
+      items.map((it) => tx.get(shopDoc(shopId, 'products', it.productId)))
     );
 
     productSnaps.forEach((snap, idx) => {
@@ -78,6 +76,7 @@ export const createOrder = async ({
     });
 
     tx.set(orderRef, {
+      shopId,
       invoiceNumber,
       items,
       subtotal,
@@ -93,10 +92,10 @@ export const createOrder = async ({
     });
   });
 
-  // post-commit (non-transactional) bookkeeping
+  // Post-commit bookkeeping (non-transactional).
   await Promise.all(
     items.map((it) =>
-      logInventoryChange({
+      logInventoryChange(shopId, {
         productId: it.productId,
         productName: it.name,
         delta: -it.qty,
@@ -109,37 +108,37 @@ export const createOrder = async ({
   );
 
   if (customer?.mobile) {
-    await upsertCustomer(customer);
-    await incrementCustomerStats(customer.mobile, total);
+    await upsertCustomer(shopId, customer);
+    await incrementCustomerStats(shopId, customer.mobile, total);
   }
 
   return { id: orderRef.id, invoiceNumber };
 };
 
-export const fetchOrder = async (id) => {
-  if (!db) return null;
-  const snap = await getDoc(doc(db, COLL, id));
+export const fetchOrder = async (shopId, id) => {
+  if (!shopId) return null;
+  const snap = await getDoc(shopDoc(shopId, COLL, id));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-export const subscribeRecentOrders = (max = 50, callback) => {
-  if (!db) {
+export const subscribeRecentOrders = (shopId, max = 50, callback) => {
+  if (!shopId) {
     callback([]);
     return () => {};
   }
-  const q = query(collection(db, COLL), orderBy('createdAt', 'desc'), limit(max));
+  const q = query(shopCol(shopId, COLL), orderBy('createdAt', 'desc'), limit(max));
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
 };
 
-export const fetchOrdersBetween = async (startDate, endDate) => {
-  if (!db) return [];
+export const fetchOrdersBetween = async (shopId, startDate, endDate) => {
+  if (!shopId) return [];
   const startTs = Timestamp.fromDate(startDate);
   const endTs = Timestamp.fromDate(endDate);
   const snap = await getDocs(
     query(
-      collection(db, COLL),
+      shopCol(shopId, COLL),
       where('createdAt', '>=', startTs),
       where('createdAt', '<=', endTs),
       orderBy('createdAt', 'desc')
@@ -148,11 +147,11 @@ export const fetchOrdersBetween = async (startDate, endDate) => {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-export const fetchOrdersByCustomer = async (mobile) => {
-  if (!db || !mobile) return [];
+export const fetchOrdersByCustomer = async (shopId, mobile) => {
+  if (!shopId || !mobile) return [];
   const snap = await getDocs(
     query(
-      collection(db, COLL),
+      shopCol(shopId, COLL),
       where('customer.mobile', '==', mobile),
       orderBy('createdAt', 'desc')
     )

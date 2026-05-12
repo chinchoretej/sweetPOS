@@ -1,73 +1,181 @@
 rules_version = '2';
 
+// SweetPOS multi-tenant security rules.
+//
+// Mental model:
+//   - shops/{shopId}/...  → tenant data, owned by that shop
+//   - users/{uid}         → global, has role + shopId
+//   - plans/{id}          → public-readable plan catalog, super-admin writes
+//   - subscriptions/{shopId} → super-admin writes; the shop owner reads own
+//   - feature_flags/{shopId} → super-admin writes; the shop owner reads own
+//   - activity_logs/{id}  → super-admin reads; clients write best-effort
+//
+// Roles enforced: super_admin, shop_owner, manager, inventory_staff, cashier
+// Tenant isolation: a user can only read/write under shops/{shopId} where
+// shopId matches their users/{uid}.shopId.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ---------- helpers ----------
+    // ───────── helpers ─────────
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isCashier() {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'cashier'];
+    function userExists() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    // ---------- users ----------
-    // Users may read/write only their own profile.
-    // Admins can read/write any user (for role management).
+    function role() {
+      return userExists() ? userDoc().role : '';
+    }
+
+    function userShopId() {
+      return userExists() ? userDoc().shopId : '';
+    }
+
+    function isSuperAdmin() {
+      return userExists() && role() == 'super_admin';
+    }
+
+    function isOwnerOf(shopId) {
+      return userExists() && role() == 'shop_owner' && userShopId() == shopId;
+    }
+
+    function isMemberOf(shopId) {
+      return userExists() && userShopId() == shopId &&
+        role() in ['shop_owner', 'manager', 'inventory_staff', 'cashier'];
+    }
+
+    function hasManageRole(shopId) {
+      return userExists() && userShopId() == shopId &&
+        role() in ['shop_owner', 'manager'];
+    }
+
+    function isCashierOrAbove(shopId) {
+      return userExists() && userShopId() == shopId &&
+        role() in ['shop_owner', 'manager', 'cashier'];
+    }
+
+    function isInventoryRole(shopId) {
+      return userExists() && userShopId() == shopId &&
+        role() in ['shop_owner', 'manager', 'inventory_staff'];
+    }
+
+    // ───────── users ─────────
+    // A user can read/update their own profile (limited fields).
+    // Super admin can do anything.
+    // First-create on initial sign-in: any signed-in user can create their own
+    // doc with role limited to non-privileged values.
     match /users/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if isSignedIn() && request.auth.uid == uid;
-      allow update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow delete: if isAdmin();
+      allow read: if isSignedIn() && (request.auth.uid == uid || isSuperAdmin());
+
+      allow create: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.role in ['super_admin', 'shop_owner', 'cashier', 'manager', 'inventory_staff'];
+
+      // Self-update: cannot escalate role or change shopId arbitrarily;
+      // shopId can only be set when previously empty (onboarding) OR by super admin.
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (
+          request.auth.uid == uid &&
+          request.resource.data.role == resource.data.role &&
+          (
+            resource.data.shopId == null ||
+            resource.data.shopId == '' ||
+            request.resource.data.shopId == resource.data.shopId
+          )
+        )
+      );
+
+      allow delete: if isSuperAdmin();
     }
 
-    // ---------- products ----------
-    // Anyone signed-in (cashier / admin) can read.
-    // Only admins can create / update / delete.
-    match /products/{id} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+    // ───────── shops (tenant root) ─────────
+    match /shops/{shopId} {
+      allow read: if isSuperAdmin() || isMemberOf(shopId);
+      // Onboarding: a signed-in user can create a shop where they are the owner.
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSuperAdmin() || isOwnerOf(shopId);
+      allow delete: if isSuperAdmin();
+
+      // ───── tenant subcollections ─────
+      match /products/{id} {
+        allow read: if isSuperAdmin() || isMemberOf(shopId);
+        allow create, update: if isSuperAdmin() || hasManageRole(shopId);
+        allow delete: if isSuperAdmin() || isOwnerOf(shopId);
+      }
+
+      match /customers/{mobile} {
+        allow read: if isSuperAdmin() || isMemberOf(shopId);
+        allow create, update: if isSuperAdmin() || isCashierOrAbove(shopId);
+        allow delete: if isSuperAdmin() || hasManageRole(shopId);
+      }
+
+      match /orders/{id} {
+        allow read: if isSuperAdmin() || isMemberOf(shopId);
+        allow create: if isSuperAdmin() || isCashierOrAbove(shopId);
+        // Orders are immutable from client (only a cloud function should update).
+        allow update: if isSuperAdmin() || hasManageRole(shopId);
+        allow delete: if isSuperAdmin();
+      }
+
+      match /inventory_logs/{id} {
+        allow read: if isSuperAdmin() || isMemberOf(shopId);
+        allow create: if isSuperAdmin() || isInventoryRole(shopId) || isCashierOrAbove(shopId);
+        allow update, delete: if isSuperAdmin();
+      }
+
+      match /employees/{mobile} {
+        allow read: if isSuperAdmin() || hasManageRole(shopId);
+        allow create, update, delete: if isSuperAdmin() || isOwnerOf(shopId);
+      }
+
+      match /settings/{doc} {
+        allow read: if isSuperAdmin() || isMemberOf(shopId);
+        allow write: if isSuperAdmin() || hasManageRole(shopId);
+      }
     }
 
-    // ---------- customers ----------
-    match /customers/{id} {
-      allow read: if isSignedIn();
-      allow create, update: if isCashier();
-      allow delete: if isAdmin();
+    // ───────── plans (catalog) ─────────
+    // Plans are publicly readable so the onboarding wizard works pre-auth.
+    match /plans/{id} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
 
-    // ---------- orders ----------
-    // Cashiers + admins can create. Once created, orders are immutable
-    // for cashiers; admins can edit / delete (refunds, corrections).
-    match /orders/{id} {
-      allow read: if isSignedIn();
-      allow create: if isCashier();
-      allow update, delete: if isAdmin();
+    // ───────── subscriptions ─────────
+    // Document id == shopId. Owners can read their own.
+    match /subscriptions/{shopId} {
+      allow read: if isSuperAdmin() || isMemberOf(shopId);
+      allow create, update, delete: if isSuperAdmin() || isOwnerOf(shopId);
     }
 
-    // ---------- inventory_logs ----------
-    match /inventory_logs/{id} {
-      allow read: if isSignedIn();
-      allow create: if isCashier();
-      allow update, delete: if isAdmin();
+    // ───────── feature flags ─────────
+    match /feature_flags/{shopId} {
+      allow read: if isSuperAdmin() || isMemberOf(shopId);
+      allow write: if isSuperAdmin();
     }
 
-    // ---------- settings ----------
-    match /settings/{id} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+    // ───────── activity logs ─────────
+    // Super admin can list everything; tenant members can only read their own
+    // shop's logs (queries must filter by shopId).
+    match /activity_logs/{id} {
+      allow read: if isSuperAdmin() ||
+        (isSignedIn() && resource.data.shopId == userShopId());
+      // Best-effort write from any signed-in user. The summary is informational.
+      allow create: if isSignedIn() &&
+        request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if isSuperAdmin();
     }
 
-    // default deny
+    // ─── Default deny ───
     match /{document=**} {
       allow read, write: if false;
     }

@@ -1,6 +1,4 @@
 import {
-  collection,
-  doc,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -13,44 +11,45 @@ import {
   where,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage } from './firebase';
+import { storage } from './firebase';
+import { shopCol, shopDoc } from './paths';
 
 const COLL = 'products';
 
-export const subscribeProducts = (callback) => {
-  if (!db) {
+export const subscribeProducts = (shopId, callback) => {
+  if (!shopId) {
     callback([]);
     return () => {};
   }
-  const q = query(collection(db, COLL), orderBy('name'));
+  const q = query(shopCol(shopId, COLL), orderBy('name'));
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
 };
 
-export const fetchProducts = async () => {
-  if (!db) return [];
-  const snap = await getDocs(query(collection(db, COLL), orderBy('name')));
+export const fetchProducts = async (shopId) => {
+  if (!shopId) return [];
+  const snap = await getDocs(query(shopCol(shopId, COLL), orderBy('name')));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-export const fetchProduct = async (id) => {
-  if (!db) return null;
-  const snap = await getDoc(doc(db, COLL, id));
+export const fetchProduct = async (shopId, id) => {
+  if (!shopId) return null;
+  const snap = await getDoc(shopDoc(shopId, COLL, id));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-export const fetchProductsByCategory = async (category) => {
-  if (!db) return [];
+export const fetchProductsByCategory = async (shopId, category) => {
+  if (!shopId) return [];
   const snap = await getDocs(
-    query(collection(db, COLL), where('category', '==', category))
+    query(shopCol(shopId, COLL), where('category', '==', category))
   );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-export const uploadProductImage = async (file, productId) => {
+export const uploadProductImage = async (shopId, file, productId) => {
   if (!storage || !file) return null;
-  const path = `products/${productId || Date.now()}_${file.name}`;
+  const path = `shops/${shopId}/products/${productId || Date.now()}_${file.name}`;
   const r = ref(storage, path);
   await uploadBytes(r, file);
   return { url: await getDownloadURL(r), path };
@@ -65,17 +64,18 @@ export const deleteProductImage = async (path) => {
   }
 };
 
-export const createProduct = async (data, file) => {
-  if (!db) throw new Error('Firebase not configured');
-  const ref = await addDoc(collection(db, COLL), {
+export const createProduct = async (shopId, data, file) => {
+  const ref = await addDoc(shopCol(shopId, COLL), {
     ...data,
+    shopId,
     imageUrl: null,
     imagePath: null,
+    soldCount: 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
   if (file) {
-    const img = await uploadProductImage(file, ref.id);
+    const img = await uploadProductImage(shopId, file, ref.id);
     if (img) {
       await updateDoc(ref, { imageUrl: img.url, imagePath: img.path });
     }
@@ -83,21 +83,19 @@ export const createProduct = async (data, file) => {
   return ref.id;
 };
 
-export const updateProduct = async (id, data, file) => {
-  if (!db) throw new Error('Firebase not configured');
+export const updateProduct = async (shopId, id, data, file) => {
   const update = { ...data, updatedAt: serverTimestamp() };
   if (file) {
-    const img = await uploadProductImage(file, id);
+    const img = await uploadProductImage(shopId, file, id);
     if (img) {
       update.imageUrl = img.url;
       update.imagePath = img.path;
     }
   }
-  await updateDoc(doc(db, COLL, id), update);
+  await updateDoc(shopDoc(shopId, COLL, id), update);
 };
 
-export const deleteProduct = async (id, imagePath) => {
-  if (!db) throw new Error('Firebase not configured');
-  await deleteDoc(doc(db, COLL, id));
+export const deleteProduct = async (shopId, id, imagePath) => {
+  await deleteDoc(shopDoc(shopId, COLL, id));
   if (imagePath) await deleteProductImage(imagePath);
 };

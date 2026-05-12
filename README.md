@@ -1,235 +1,285 @@
-# SweetPOS — Sweet Shop Billing & Inventory PWA
+# SweetPOS — Multi-Tenant Sweet Shop SaaS
 
-A production-ready Sweet Shop POS built with **React + Vite**, **Tailwind CSS**, **Firebase** (Auth, Firestore, Storage) and **Zustand**. Installs as a PWA, works offline, prints A4 + thermal invoices, supports Marathi + English, and deploys to GitHub Pages.
+A production-grade **multi-tenant SaaS PWA** for sweet / mithai shops, built on
+React + Vite + Tailwind + Firebase, deployable to GitHub Pages.
 
----
-
-## ✨ Features
-
-- 🔐 **Authentication** — Mobile OTP (Firebase Phone Auth) + Admin email/password
-- 📊 **Dashboard** — Today + monthly sales, low-stock alerts, recent bills, top sweets
-- 🛒 **Billing / POS** — Instant search, cart, kg/g/pcs, discount (flat/%), optional GST, cash/UPI/card, invoice number
-- 📦 **Products** — CRUD with image upload (Firebase Storage), categories, low-stock thresholds, barcode field
-- 📈 **Inventory** — Real-time stock, atomic deduction at billing, restock, adjustments, full inventory log + daily report
-- 👥 **Customers** — Auto-created from billing mobile, full purchase history, total spent
-- 🧾 **Orders** — Searchable list with date/payment filters; reprintable invoices, PDF export
-- 📊 **Reports** — Sales over time (line), top products (bar), payment mix (doughnut), CSV export
-- ⚙️ **Settings** — Shop info, currency, GST, language (EN/MR), thermal vs A4 printer, dark mode
-- 📱 **PWA** — Installable, offline (Firestore persistent cache + Workbox), service worker, manifest, install prompt
-- 🖨️ **Print-ready** — A4 invoice + 58/80mm thermal layout, QR (UPI) on receipt
-- 💬 **WhatsApp share** — Send formatted bill to the customer's number in one tap
-- ⌨️ **Keyboard shortcuts** — Alt+N (search), Alt+C (customer), Alt+P (pay), Alt+R (reset)
-- 🌗 **Dark mode** + smooth animations + skeletons + toasts + error boundary
+> v2.0 upgrades the original single-tenant POS into a full SaaS platform with a
+> Super Admin panel, per-shop subscriptions, plan-based feature flags and
+> tenant-isolated Firestore rules — without breaking any existing flows.
 
 ---
 
-## 🧱 Tech Stack
+## ✨ Core capabilities
 
-| Layer | Tech |
-| --- | --- |
-| Framework | React 18 + Vite |
-| Styling | Tailwind CSS, Lucide icons |
-| State | Zustand (cart) + Context API (auth, theme, i18n, settings, toast) |
-| Backend | Firebase Auth, Firestore, Storage |
-| Charts | Chart.js + react-chartjs-2 |
-| PDF / QR | jsPDF + jspdf-autotable + qrcode |
-| PWA | vite-plugin-pwa (Workbox) |
-| Deploy | GitHub Pages via `gh-pages` |
+### Platform Owner (Super Admin)
+- Platform Dashboard (total shops, active subs, MRR estimate, recent activity)
+- Shops CRUD (create, suspend, activate, archive, delete)
+- Subscriptions table with status, plan, days remaining
+- Plans editor (Free Trial / Basic / Premium / Enterprise) — features, limits, pricing
+- Per-shop Feature Flag overrides (force ON / OFF / inherit plan)
+- Activity Logs (audit trail across all tenants)
+- Platform Analytics (signups over time, plan mix)
+- One-click migration of legacy v1 flat collections into a shop subcollection
+
+### Shop Owner
+- Existing **Billing, Inventory, Customers, Orders, Reports, Settings** all
+  preserved and now isolated to their tenant.
+- Onboarding wizard to create their shop and pick a starter plan.
+- **Employees** page — invite cashiers, managers, inventory staff with role-based access.
+- Plan badge + days remaining banner in the sidebar.
+
+### Employees
+- Permission-aware UI (cashier sees only Billing, etc.)
+- Invited by mobile; bound to a shop on first OTP login.
+
+### PWA / UX
+- Installable, offline-capable (Workbox + Firestore persistent cache)
+- Dark mode, English + Marathi
+- Skeletons, toasts, error boundary, optimistic updates
+- Thermal & A4 PDF invoices, QR (UPI), WhatsApp share
+- Keyboard shortcuts (Alt+1..9 nav, Alt+P for billing print, etc.)
 
 ---
 
-## 📁 Project Structure
+## 🧱 Architecture
+
+### Tenant model: subcollections under `shops/{shopId}/`
 
 ```
-sweetPOS/
-├── public/                 # static assets, manifest icons, GH-Pages 404 fallback
-├── src/
-│   ├── components/         # ui/, layout/, billing/, products/, common/, pwa/
-│   ├── context/            # AuthContext, ThemeContext, SettingsContext, ToastContext, I18nContext
-│   ├── hooks/              # useDebounce, useKeyboardShortcuts, useLocalStorage, useOnlineStatus
-│   ├── i18n/               # en.js, mr.js
-│   ├── pages/              # Login, Dashboard, Billing, Products, Inventory, Customers, Orders, OrderDetails, Reports, Settings, NotFound
-│   ├── services/           # firebase.js, authService, productService, inventoryService, orderService, customerService, settingsService
-│   ├── store/              # cartStore.js (Zustand)
-│   ├── utils/              # format.js, invoice.js, whatsapp.js, validators.js, seedData.js
-│   ├── constants/          # routes.js, categories.js, shortcuts.js
-│   ├── styles/index.css
-│   ├── App.jsx, main.jsx, router.jsx
-├── firebase/               # firestore.rules, storage.rules, firestore.indexes.json, firebase.json
-├── .env.example
-├── vite.config.js / tailwind.config.js / postcss.config.js
-└── package.json
+shops/{shopId}                 ← tenant root (status, ownerUid, ...)
+shops/{shopId}/products/...
+shops/{shopId}/customers/...
+shops/{shopId}/orders/...
+shops/{shopId}/inventory_logs/...
+shops/{shopId}/employees/...
+shops/{shopId}/settings/shop
+
+users/{uid}                    ← role, shopId, status (global)
+plans/{planId}                 ← built-in catalog (publicly readable)
+subscriptions/{shopId}         ← status, planId, currentPeriodEnd
+feature_flags/{shopId}         ← per-shop overrides
+activity_logs/{logId}          ← audit trail
 ```
+
+Subcollections give **strong implicit tenant isolation** in security rules
+(no risk of forgetting a `where shopId == X` filter).
+
+### Roles & permissions
+
+```
+super_admin > shop_owner > manager > inventory_staff > cashier
+```
+
+Defined in `src/permissions/roles.js` and `src/permissions/permissions.js` as a
+declarative capability matrix. The `useTenant()` hook exposes
+`can(perm)` and `hasFeature(key)`.
+
+### Feature flags
+
+Effective features for a shop:
+
+```
+features = DEFAULT_FEATURES ∪ plan.features ∪ feature_flags/{shopId}.features
+```
+
+Frontend hides menu items / pages, and the `<FeatureGuard>` component renders an
+upgrade-prompt empty state for users who hit a disabled feature directly.
+
+### Subscription gating
+
+`<TenantGate>` wraps all tenant routes. It redirects to:
+- `/onboarding` if a tenant user has no `shopId`
+- `/subscription` if shop is suspended or the subscription is expired/cancelled
+- `/admin` if a super-admin lands on a tenant URL
 
 ---
 
-## 🚀 Quick Start (Local)
+## 🚀 Quick start
 
 ```bash
-# 1. Install
 npm install
-
-# 2. Copy env template and fill in your Firebase keys
-cp .env.example .env
-
-# 3. Run dev server
-npm run dev          # http://localhost:5173
+cp .env.example .env             # then fill in Firebase keys + SUPER_ADMIN_EMAILS
+npm run dev
 ```
 
-If you don't configure Firebase yet, you can still log in via the **Admin** tab using the email from `VITE_ADMIN_EMAILS` and `VITE_DEV_ADMIN_PASSWORD` (offline dev mode — data won't persist across sessions).
+Open <http://localhost:5173>.
+
+### Required env vars
+
+| Var | Purpose |
+| --- | --- |
+| `VITE_FIREBASE_*` | Firebase web app config |
+| `VITE_SUPER_ADMIN_EMAILS` | Comma-separated emails auto-promoted to super admin |
+| `VITE_ADMIN_EMAILS` | Legacy v1 admin emails → bootstrapped as `shop_owner` |
+| `VITE_BASE_PATH` | Vite/Router base, e.g. `/sweetPOS/` for GH Pages |
+| `VITE_DEV_ADMIN_PASSWORD` | DEV-only fallback for offline auth |
 
 ---
 
-## 🔥 Firebase Setup
+## 🔒 Firebase setup
 
-1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com).
-2. **Enable services**:
-   - **Authentication** → Sign-in methods → enable **Phone** and **Email/Password**.
-     - For Phone Auth on `localhost`, add `localhost` to **Authorized domains**.
-     - Add your GitHub Pages URL (e.g. `your-username.github.io`) to authorized domains for production.
-   - **Firestore Database** → create in production mode.
-   - **Storage** → create with default bucket.
-3. **Add a Web App** (Project settings → Your apps → Web). Copy the config into your `.env`:
+1. Create a Firebase project (or reuse existing).
+2. **Authentication** → enable **Phone** + **Email/Password**.
+3. **Firestore** → create database (production mode).
+4. **Storage** → enable.
+5. Authorise your domain in Auth → Settings → Authorized domains.
 
-```env
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-VITE_FIREBASE_MEASUREMENT_ID=...
-VITE_ADMIN_EMAILS=admin@example.com
-VITE_BASE_PATH=/sweetPOS/
-```
-
-4. **Deploy security rules + indexes** (optional but recommended):
+Deploy rules + indexes:
 
 ```bash
-npm install -g firebase-tools
 firebase login
-cd firebase
-firebase use --add        # pick your project
+firebase use <your-project-id>
 firebase deploy --only firestore:rules,firestore:indexes,storage
 ```
 
-5. **Bootstrap an admin** — log in once via the **Admin** tab using an email listed in `VITE_ADMIN_EMAILS`. Their `users/{uid}` document is auto-created with `role: "admin"`.
+The included rules (`firebase/firestore.rules`, `firebase/storage.rules`) enforce:
+- A user can only read/write under `shops/{shopId}` where their `users/{uid}.shopId` matches.
+- Cashiers cannot delete products / orders / customers.
+- Only super admins can write `plans` and `feature_flags`.
+- Plans are publicly readable so onboarding works pre-auth.
 
-6. **Seed sample data** — Settings page → "Seed sample products" (or it auto-prompts on the empty Dashboard).
+### Bootstrapping the first super admin
+
+1. Add your email to `VITE_SUPER_ADMIN_EMAILS` and redeploy (or run locally).
+2. Visit `/login` → admin login form → enter your email + a password.
+3. The auth service auto-creates the Firebase user **and** writes
+   `users/{uid}` with `role: super_admin`.
+4. You'll land on `/admin` (Super Admin panel).
 
 ---
 
-## 🌐 Deploying to GitHub Pages
+## 🪪 Roles in detail
 
-1. Push the repo to GitHub. Update `homepage` in `package.json` to `https://<your-username>.github.io/<repo>/`.
+| Role | Permissions |
+| --- | --- |
+| `super_admin` | Everything platform-wide |
+| `shop_owner` | All tenant data + employee management + settings |
+| `manager` | All tenant data + inventory + reports + view settings (no employee mgmt) |
+| `inventory_staff` | View products, manage inventory only |
+| `cashier` | Billing + view products + view/manage customers |
 
-2. Set `VITE_BASE_PATH` in `.env.production` (or in your CI env) to `/<repo>/` — must end with `/`.
+---
 
-3. Build & deploy:
+## 🧬 Migrating from v1 (single-tenant)
 
-```bash
-npm run deploy        # runs vite build then publishes /dist via gh-pages
+If you have existing data under top-level `products`, `orders`, `customers`,
+`inventory_logs`, `settings`:
+
+1. Log in as **super admin**.
+2. Open **Super Admin → Shops → (your shop) → Migration** card.
+3. Click **Migrate v1 → this shop**.
+4. The tool batches everything into `shops/{shopId}/...` and stamps `migratedAt`.
+   It is idempotent — safe to re-run.
+
+After verifying, you can delete the legacy top-level collections from the
+Firebase console.
+
+---
+
+## 🧪 Test data
+
+After onboarding your first shop, sample products can be seeded by calling
+`seedSampleProducts(shopId)` from `src/utils/seedData.js` — you can wire a
+button in Settings if useful.
+
+---
+
+## 📦 Project structure (v2)
+
+```
+src/
+  app/                    # (reserved) future app-level providers
+  components/
+    common/ ErrorBoundary
+    guards/ RoleGuard, PermissionGuard, FeatureGuard, TenantGate, SuperAdminGate
+    layout/ AppLayout, AdminLayout, Sidebar, Topbar, ProtectedRoute
+    pwa/    OfflineBanner, InstallPrompt
+    ui/     Button, Input, Select, Modal, Card, Badge, Skeleton, Spinner, …
+  constants/   routes, categories, plans, shortcuts
+  context/     AuthContext, TenantContext, SettingsContext, ThemeContext, ToastContext, I18nContext
+  hooks/       useDebounce, useLocalStorage, useKeyboardShortcuts, useOnlineStatus
+  i18n/        en, mr
+  pages/
+    superadmin/ PlatformDashboard, Shops, ShopDetails, Plans,
+                Subscriptions, FeatureFlags, ActivityLogs, PlatformAnalytics
+    Login, Dashboard, Billing, Products, Inventory, Customers, Orders,
+    OrderDetails, Reports, Settings, Employees, Onboarding, SubscriptionGate, NotFound
+  permissions/ roles, permissions, features
+  services/    firebase, paths, authService,
+               productService, orderService, customerService, inventoryService, settingsService,
+               shopService, planService, subscriptionService, featureFlagService,
+               employeeService, activityLogService, migrationService
+  store/       cartStore (Zustand)
+  utils/       format, invoice, whatsapp, validators, seedData
+  router.jsx
+  App.jsx, main.jsx
+firebase/
+  firestore.rules
+  storage.rules
+  firestore.indexes.json
+.github/workflows/deploy.yml
 ```
 
-4. In your repo on GitHub: **Settings → Pages → Source = Deploy from a branch → `gh-pages` / root**.
-
-5. **SPA routing** is handled by `public/404.html` + the redirect logic in `src/main.jsx` (preserves deep links).
-
-6. Add your Pages URL to Firebase **Auth → Authorized domains** so Phone Auth works in production.
-
-> ⚠️ Firebase **Phone Auth** requires HTTPS. GitHub Pages serves HTTPS by default — perfect.
-
 ---
 
-## 🧪 Test Data Examples
+## 🚢 Deployment to GitHub Pages
 
-After seeding, you'll have these sweets ready to bill:
+A GitHub Actions workflow (`.github/workflows/deploy.yml`) auto-deploys on
+every push to `main`. It injects Firebase + super-admin secrets at build time:
 
-| Sweet | Category | Price (₹/unit) | Stock |
-| --- | --- | --- | --- |
-| Kaju Katli | Dry Fruit Sweets | 950/kg | 5 kg |
-| Motichoor Laddoo | Festival Specials | 480/kg | 8 kg |
-| Rasgulla | Bengali Sweets | 420/pcs | 60 |
-| Gulab Jamun | Bengali Sweets | 360/pcs | 80 |
-| Soan Papdi | Festival Specials | 420/kg | 12 kg |
-| Sugar-Free Anjeer Roll | Sugar-Free | 1200/kg | 3 kg |
-| Besan Laddoo | Milk Sweets | 420/kg | 7 kg |
-| Kaju Roll | Dry Fruit Sweets | 1100/kg | 4 kg |
-| Mixture Namkeen | Namkeen | 320/kg | 15 kg |
-
-**Sample admin login** (if env defaults are kept):
-- Email: `admin@example.com`
-- Password: `admin123`
-
-**Sample test bill flow**:
-1. Open **Billing** → search "kaju" → tap **Kaju Katli** twice (adds 0.5 kg)
-2. Enter customer mobile `9876543210`, name `Test Customer`
-3. Apply 5% discount (toggle the `₹/%` button)
-4. Hit **Collect Payment (Alt+P)** → choose **UPI** → **Confirm**
-5. Print, download PDF, or share on WhatsApp
-
----
-
-## 📜 Available Scripts
-
-| Script | What it does |
+| Secret | Notes |
 | --- | --- |
-| `npm run dev` | Start dev server with HMR |
-| `npm run build` | Production build to `dist/` |
-| `npm run preview` | Preview the production build locally |
-| `npm run lint` | Lint with ESLint |
-| `npm run deploy` | Build + publish `dist/` to `gh-pages` branch |
+| `FIREBASE_API_KEY` | required |
+| `FIREBASE_AUTH_DOMAIN` | required |
+| `FIREBASE_PROJECT_ID` | required |
+| `FIREBASE_STORAGE_BUCKET` | required |
+| `FIREBASE_MESSAGING_SENDER_ID` | required |
+| `FIREBASE_APP_ID` | required |
+| `FIREBASE_MEASUREMENT_ID` | optional |
+| `SUPER_ADMIN_EMAILS` | required for SaaS |
+| `ADMIN_EMAILS` | optional legacy |
+
+Set them in **Repo → Settings → Secrets and variables → Actions**.
+
+Manual one-off:
+
+```bash
+npm run build
+npm run deploy   # uses gh-pages package
+```
 
 ---
 
-## ⌨️ Keyboard Shortcuts (Billing)
+## ✅ Production hardening checklist
 
-| Combo | Action |
-| --- | --- |
-| `Alt + N` | Focus product search |
-| `Alt + C` | Focus customer mobile |
-| `Alt + P` | Open payment dialog |
-| `Alt + R` | Reset cart |
-| `Esc` | Close any open dialog |
-
----
-
-## 🗂️ Firestore Collections
-
-| Collection | Doc ID | Purpose |
-| --- | --- | --- |
-| `users` | `uid` | Role (admin / cashier), profile |
-| `products` | auto | Sweets catalog with stock & images |
-| `customers` | mobile (10-digit) | Customer profile, totalSpent, orderCount |
-| `orders` | auto | Invoice + items + totals + payment |
-| `inventory_logs` | auto | Stock movements (sale/restock/adjustment) |
-| `settings` | `shop` | Shop info, GST, currency, printer |
+- [ ] Set strict allow-list in `VITE_SUPER_ADMIN_EMAILS`.
+- [ ] Deploy `firestore.rules` and `storage.rules` (do NOT use test mode).
+- [ ] Enable App Check (reCAPTCHA Enterprise) for Auth + Firestore in prod.
+- [ ] Add Cloud Functions to:
+  - cascade-delete `shops/{id}/**` on shop archive
+  - send invite SMS / email when a shop owner adds an employee
+  - run nightly job to expire trials and flip subscription status
+- [ ] Configure Firestore backups (daily export to GCS).
+- [ ] Add Stripe / Razorpay webhooks → update `subscriptions/{shopId}`.
+- [ ] Add monitoring: Sentry for client errors, Firebase Performance.
+- [ ] Custom domain via Firebase Hosting or GitHub Pages CNAME.
+- [ ] Configure CORS on Storage if you embed images on a third-party site.
 
 ---
 
-## 🛡️ Security Rules
+## 📈 SaaS scaling recommendations
 
-See `firebase/firestore.rules` & `firebase/storage.rules`. Highlights:
-- All reads require an authenticated user
-- **Cashiers** can create orders, customers, inventory logs
-- **Admins** can manage products, settings, edit/delete orders
-- Storage product images are public-read (so receipts render), admin-write with 2 MB / image-only validation
-
-Role is bootstrapped automatically when an email in `VITE_ADMIN_EMAILS` signs in.
-
----
-
-## 🧭 Roadmap Ideas
-
-- Cloud Functions for monthly summary reports
-- Excel export
-- Multi-shop support
-- Loyalty / coupons module
-- Hardware barcode scanner test bench
-- Cypress e2e tests
+- **Indexing**: as orders grow, switch reports to per-month rollup docs in
+  `shops/{id}/stats/{YYYY-MM}` written by Cloud Functions.
+- **Reads**: paginate the Orders / Customers tables (Firestore `startAfter`).
+- **Bundling**: Super Admin pages are lazy-loaded; consider lazy-loading the
+  Reports page (which pulls in chart.js) for cashier-only roles.
+- **Cold-start auth**: cache `users/{uid}` in localStorage and hydrate before
+  Firebase Auth resolves to avoid the spinner flash.
+- **Multi-region**: switch Firestore to multi-region if going beyond 10k shops.
 
 ---
 
-## 📝 License
+## 📜 License
 
-MIT — use freely for your shop, school project, or product.
+MIT © Tej Chinchore

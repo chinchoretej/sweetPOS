@@ -8,14 +8,20 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebase';
+import { ROLES, normalizeLegacyRole } from '../permissions/roles';
 
-const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '')
+const SUPER_ADMIN_EMAILS = (import.meta.env.VITE_SUPER_ADMIN_EMAILS || '')
   .split(',')
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
-const DEV_ADMIN_PASSWORD =
-  import.meta.env.VITE_DEV_ADMIN_PASSWORD || 'admin123';
+// Legacy v1 admins (used to bootstrap shop owners on existing accounts)
+const LEGACY_ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+const DEV_ADMIN_PASSWORD = import.meta.env.VITE_DEV_ADMIN_PASSWORD || 'admin123';
 
 /* ------------------------- helpers ------------------------- */
 
@@ -23,21 +29,49 @@ const ensureUserDoc = async (user, extra = {}) => {
   if (!db || !user) return null;
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
-  const isAdmin =
-    extra.role === 'admin' ||
-    (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+
+  const emailLower = (user.email || extra.email || '').toLowerCase();
+  const isSuperAdmin = emailLower && SUPER_ADMIN_EMAILS.includes(emailLower);
+
   if (!snap.exists()) {
+    // First-ever login. New users default to "unassigned" — they will see
+    // the onboarding wizard to create their shop, becoming SHOP_OWNER.
+    // Super admins from the env allow-list get SUPER_ADMIN immediately.
+    let role = ROLES.CASHIER;
+    if (isSuperAdmin) role = ROLES.SUPER_ADMIN;
+    else if (emailLower && LEGACY_ADMIN_EMAILS.includes(emailLower)) {
+      // Backwards-compat: env-listed v1 admins → SHOP_OWNER (will onboard)
+      role = ROLES.SHOP_OWNER;
+    } else if (extra.role) {
+      role = extra.role;
+    }
+
     await setDoc(ref, {
       uid: user.uid,
       phone: user.phoneNumber || null,
       email: user.email || null,
       displayName: user.displayName || extra.displayName || null,
-      role: isAdmin ? 'admin' : 'cashier',
+      role,
+      shopId: extra.shopId || null,
+      status: 'active',
       createdAt: serverTimestamp(),
-      ...extra,
+      updatedAt: serverTimestamp(),
     });
-  } else if (isAdmin && snap.data().role !== 'admin') {
-    await setDoc(ref, { role: 'admin' }, { merge: true });
+  } else {
+    // Existing user — reconcile super-admin status if env was changed.
+    const data = snap.data();
+    const patch = {};
+    if (isSuperAdmin && data.role !== ROLES.SUPER_ADMIN) {
+      patch.role = ROLES.SUPER_ADMIN;
+    }
+    // Migrate legacy 'admin' role → SHOP_OWNER
+    if (data.role === 'admin') {
+      patch.role = isSuperAdmin ? ROLES.SUPER_ADMIN : ROLES.SHOP_OWNER;
+    }
+    if (Object.keys(patch).length) {
+      patch.updatedAt = serverTimestamp();
+      await setDoc(ref, patch, { merge: true });
+    }
   }
   return (await getDoc(ref)).data();
 };
@@ -53,25 +87,17 @@ export const setupRecaptcha = (containerId = 'recaptcha-container') => {
       /* noop */
     }
   }
-  const verifier = new RecaptchaVerifier(auth, containerId, {
-    size: 'invisible',
-  });
+  const verifier = new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
   window.__sweetposRecaptcha = verifier;
   return verifier;
 };
 
 export const sendOtp = async (mobileNumber, recaptchaVerifier) => {
   if (!auth) throw new Error('Firebase not configured');
-  // Normalize: prepend +91 if not present (India default).
   const phone = mobileNumber.startsWith('+')
     ? mobileNumber
     : `+91${mobileNumber.replace(/\D/g, '')}`;
-  const confirmation = await signInWithPhoneNumber(
-    auth,
-    phone,
-    recaptchaVerifier
-  );
-  return confirmation;
+  return signInWithPhoneNumber(auth, phone, recaptchaVerifier);
 };
 
 export const verifyOtp = async (confirmation, otp) => {
@@ -83,18 +109,22 @@ export const verifyOtp = async (confirmation, otp) => {
 /* ----------------------- admin login ----------------------- */
 
 export const adminLogin = async (email, password) => {
+  const emailLower = email.toLowerCase();
+
   if (!isFirebaseConfigured) {
-    // dev/offline fallback
     if (
-      ADMIN_EMAILS.includes(email.toLowerCase()) &&
+      (LEGACY_ADMIN_EMAILS.includes(emailLower) ||
+        SUPER_ADMIN_EMAILS.includes(emailLower)) &&
       password === DEV_ADMIN_PASSWORD
     ) {
       const fakeUser = {
         uid: 'dev-admin',
         email,
         displayName: 'Dev Admin',
-        role: 'admin',
-        isAnonymous: false,
+        role: SUPER_ADMIN_EMAILS.includes(emailLower)
+          ? ROLES.SUPER_ADMIN
+          : ROLES.SHOP_OWNER,
+        shopId: null,
         phoneNumber: null,
       };
       localStorage.setItem('sweetpos:devUser', JSON.stringify(fakeUser));
@@ -102,25 +132,25 @@ export const adminLogin = async (email, password) => {
     }
     throw new Error('Invalid admin credentials (dev mode)');
   }
+
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
-    await ensureUserDoc(cred.user, { role: 'admin' });
+    await ensureUserDoc(cred.user);
     return cred.user;
   } catch (err) {
-    // Modern Firebase returns the same `auth/invalid-credential` for both
-    // "wrong password" and "user does not exist" (email-enumeration
-    // protection). For allow-listed admin emails we transparently create
-    // the account on first login. If the account already exists with a
-    // different password, surface a clear error.
     const looksMissing =
       err.code === 'auth/user-not-found' ||
       err.code === 'auth/invalid-credential' ||
       err.code === 'auth/invalid-login-credentials';
 
-    if (looksMissing && ADMIN_EMAILS.includes(email.toLowerCase())) {
+    const isAllowed =
+      LEGACY_ADMIN_EMAILS.includes(emailLower) ||
+      SUPER_ADMIN_EMAILS.includes(emailLower);
+
+    if (looksMissing && isAllowed) {
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
-        await ensureUserDoc(cred.user, { role: 'admin' });
+        await ensureUserDoc(cred.user);
         return cred.user;
       } catch (createErr) {
         if (createErr.code === 'auth/email-already-in-use') {
@@ -153,17 +183,22 @@ export const subscribeAuth = (callback) => {
   }
   return onAuthStateChanged(auth, async (user) => {
     if (!user) return callback(null);
+
     let profile = null;
     if (db) {
       const snap = await getDoc(doc(db, 'users', user.uid));
       profile = snap.exists() ? snap.data() : await ensureUserDoc(user);
     }
+
     callback({
       uid: user.uid,
       email: user.email,
       phoneNumber: user.phoneNumber,
       displayName: user.displayName || profile?.displayName,
-      role: profile?.role || 'cashier',
+      role: normalizeLegacyRole(profile?.role),
+      shopId: profile?.shopId || null,
+      status: profile?.status || 'active',
+      permissions: profile?.permissions || [],
     });
   });
 };

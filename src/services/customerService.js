@@ -1,6 +1,4 @@
 import {
-  collection,
-  doc,
   getDocs,
   getDoc,
   setDoc,
@@ -12,25 +10,25 @@ import {
   increment,
   limit,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { shopCol, shopDoc } from './paths';
 
 const COLL = 'customers';
 
 const sanitizeMobile = (m) => (m || '').replace(/\D/g, '').slice(-10);
 
-export const findCustomerByMobile = async (mobile) => {
-  if (!db) return null;
+export const findCustomerByMobile = async (shopId, mobile) => {
+  if (!shopId) return null;
   const id = sanitizeMobile(mobile);
   if (!id) return null;
-  const snap = await getDoc(doc(db, COLL, id));
+  const snap = await getDoc(shopDoc(shopId, COLL, id));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-export const upsertCustomer = async ({ mobile, name = '', address = '' }) => {
-  if (!db) return null;
+export const upsertCustomer = async (shopId, { mobile, name = '', address = '' }) => {
+  if (!shopId) return null;
   const id = sanitizeMobile(mobile);
   if (!id) return null;
-  const ref = doc(db, COLL, id);
+  const ref = shopDoc(shopId, COLL, id);
   const existing = await getDoc(ref);
   if (existing.exists()) {
     await setDoc(
@@ -44,6 +42,7 @@ export const upsertCustomer = async ({ mobile, name = '', address = '' }) => {
     );
   } else {
     await setDoc(ref, {
+      shopId,
       mobile: id,
       name,
       address,
@@ -56,12 +55,12 @@ export const upsertCustomer = async ({ mobile, name = '', address = '' }) => {
   return (await getDoc(ref)).data();
 };
 
-export const incrementCustomerStats = async (mobile, amount) => {
-  if (!db) return;
+export const incrementCustomerStats = async (shopId, mobile, amount) => {
+  if (!shopId) return;
   const id = sanitizeMobile(mobile);
   if (!id) return;
   await setDoc(
-    doc(db, COLL, id),
+    shopDoc(shopId, COLL, id),
     {
       totalSpent: increment(amount),
       orderCount: increment(1),
@@ -71,26 +70,30 @@ export const incrementCustomerStats = async (mobile, amount) => {
   );
 };
 
-export const subscribeCustomers = (callback) => {
-  if (!db) {
+export const subscribeCustomers = (shopId, callback) => {
+  if (!shopId) {
     callback([]);
     return () => {};
   }
-  const q = query(collection(db, COLL), orderBy('updatedAt', 'desc'), limit(500));
+  const q = query(shopCol(shopId, COLL), orderBy('updatedAt', 'desc'), limit(500));
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
 };
 
-export const searchCustomers = async (term) => {
-  if (!db || !term) return [];
+export const searchCustomers = async (shopId, term) => {
+  if (!shopId || !term) return [];
   const id = sanitizeMobile(term);
   if (id) {
-    const snap = await getDoc(doc(db, COLL, id));
+    const snap = await getDoc(shopDoc(shopId, COLL, id));
     return snap.exists() ? [{ id: snap.id, ...snap.data() }] : [];
   }
   const snap = await getDocs(
-    query(collection(db, COLL), where('name', '>=', term), where('name', '<=', term + '\uf8ff'))
+    query(
+      shopCol(shopId, COLL),
+      where('name', '>=', term),
+      where('name', '<=', term + '\uf8ff')
+    )
   );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };

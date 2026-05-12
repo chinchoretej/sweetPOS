@@ -7,19 +7,22 @@ import EmptyState from '../components/ui/EmptyState';
 import InvoiceView from '../components/billing/InvoiceView';
 import { fetchOrder } from '../services/orderService';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { downloadInvoicePdf, printInvoiceWindow } from '../utils/invoice';
 import { shareOnWhatsApp } from '../utils/whatsapp';
 
 export default function OrderDetails() {
   const { id } = useParams();
+  const { shopId } = useTenant();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { settings } = useSettings();
 
   useEffect(() => {
+    if (!shopId) return;
     let active = true;
-    fetchOrder(id).then((o) => {
+    fetchOrder(shopId, id).then((o) => {
       if (active) {
         setOrder(o);
         setLoading(false);
@@ -28,7 +31,7 @@ export default function OrderDetails() {
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [id, shopId]);
 
   if (loading) return <CardSkeleton />;
   if (!order) return <EmptyState title="Order not found" />;

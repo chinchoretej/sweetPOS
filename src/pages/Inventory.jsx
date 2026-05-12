@@ -9,6 +9,7 @@ import { TableRowSkeleton } from '../components/ui/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { subscribeProducts } from '../services/productService';
 import {
   restockProduct,
@@ -20,6 +21,7 @@ import { friendlyDate } from '../utils/format';
 const TYPE_TONE = { restock: 'success', sale: 'info', adjustment: 'warning' };
 
 export default function Inventory() {
+  const { shopId } = useTenant();
   const [products, setProducts] = useState([]);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,16 +36,17 @@ export default function Inventory() {
   const { settings } = useSettings();
 
   useEffect(() => {
+    if (!shopId) return;
     let pending = 2;
     const done = () => {
       pending -= 1;
       if (pending === 0) setLoading(false);
     };
-    const u1 = subscribeProducts((p) => {
+    const u1 = subscribeProducts(shopId, (p) => {
       setProducts(p);
       done();
     });
-    const u2 = subscribeInventoryLogs(150, (l) => {
+    const u2 = subscribeInventoryLogs(shopId, 150, (l) => {
       setLogs(l);
       done();
     });
@@ -51,7 +54,7 @@ export default function Inventory() {
       u1 && u1();
       u2 && u2();
     };
-  }, []);
+  }, [shopId]);
 
   const lowStock = useMemo(
     () =>
@@ -103,10 +106,10 @@ export default function Inventory() {
     setSubmitting(true);
     try {
       if (mode === 'restock') {
-        await restockProduct(activeProduct, Math.abs(numQty), user?.uid);
+        await restockProduct(shopId, activeProduct, Math.abs(numQty), user?.uid);
         toast.success(`Restocked ${activeProduct.name}`);
       } else {
-        await adjustStock(activeProduct, numQty, reason, user?.uid);
+        await adjustStock(shopId, activeProduct, numQty, reason, user?.uid);
         toast.success('Stock adjusted');
       }
       setActiveProduct(null);

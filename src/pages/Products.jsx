@@ -19,9 +19,13 @@ import { DEFAULT_CATEGORIES } from '../constants/categories';
 import useDebounce from '../hooks/useDebounce';
 import { useToast } from '../context/ToastContext';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
+import { PERMS } from '../permissions/permissions';
 import { formatCurrency } from '../utils/format';
 
 export default function Products() {
+  const { shopId, can } = useTenant();
+  const canManage = can(PERMS.PRODUCT_MANAGE);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -35,12 +39,13 @@ export default function Products() {
   const { settings } = useSettings();
 
   useEffect(() => {
-    const unsub = subscribeProducts((data) => {
+    if (!shopId) return;
+    const unsub = subscribeProducts(shopId, (data) => {
       setItems(data);
       setLoading(false);
     });
     return () => unsub && unsub();
-  }, []);
+  }, [shopId]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set(DEFAULT_CATEGORIES);
@@ -74,10 +79,10 @@ export default function Products() {
   const handleSubmit = async (data, file) => {
     try {
       if (editing) {
-        await updateProduct(editing.id, data, file);
+        await updateProduct(shopId, editing.id, data, file);
         toast.success('Product updated');
       } else {
-        await createProduct(data, file);
+        await createProduct(shopId, data, file);
         toast.success('Product added');
       }
       setModalOpen(false);
@@ -90,7 +95,7 @@ export default function Products() {
     if (!confirmDel) return;
     setDelLoading(true);
     try {
-      await deleteProduct(confirmDel.id, confirmDel.imagePath);
+      await deleteProduct(shopId, confirmDel.id, confirmDel.imagePath);
       toast.success('Product deleted');
       setConfirmDel(null);
     } catch (err) {
@@ -109,9 +114,11 @@ export default function Products() {
             Manage your sweets, prices, and categories.
           </p>
         </div>
-        <Button onClick={openNew} icon={<Plus className="w-4 h-4" />}>
-          Add Product
-        </Button>
+        {canManage && (
+          <Button onClick={openNew} icon={<Plus className="w-4 h-4" />}>
+            Add Product
+          </Button>
+        )}
       </div>
 
       <div className="card p-3 sm:p-4 grid sm:grid-cols-3 gap-3">
@@ -212,22 +219,26 @@ export default function Products() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="inline-flex gap-1">
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600"
-                            title="Edit"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDel(p)}
-                            className="p-1.5 rounded hover:bg-rose-50 dark:hover:bg-rose-500/10 text-rose-600"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                        {canManage ? (
+                          <div className="inline-flex gap-1">
+                            <button
+                              onClick={() => openEdit(p)}
+                              className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600"
+                              title="Edit"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setConfirmDel(p)}
+                              className="p-1.5 rounded hover:bg-rose-50 dark:hover:bg-rose-500/10 text-rose-600"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">read-only</span>
+                        )}
                       </td>
                     </tr>
                   );

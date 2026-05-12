@@ -1,7 +1,5 @@
 import {
-  collection,
   addDoc,
-  doc,
   updateDoc,
   query,
   orderBy,
@@ -11,11 +9,11 @@ import {
   increment,
   onSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { shopCol, shopDoc } from './paths';
 
 const COLL = 'inventory_logs';
 
-export const logInventoryChange = async ({
+export const logInventoryChange = async (shopId, {
   productId,
   productName,
   delta,
@@ -24,8 +22,9 @@ export const logInventoryChange = async ({
   userId = null,
   unit = 'kg',
 }) => {
-  if (!db) return null;
-  return addDoc(collection(db, COLL), {
+  if (!shopId) return null;
+  return addDoc(shopCol(shopId, COLL), {
+    shopId,
     productId,
     productName,
     delta,
@@ -37,13 +36,12 @@ export const logInventoryChange = async ({
   });
 };
 
-export const restockProduct = async (product, qty, userId) => {
-  if (!db) throw new Error('Firebase not configured');
-  await updateDoc(doc(db, 'products', product.id), {
+export const restockProduct = async (shopId, product, qty, userId) => {
+  await updateDoc(shopDoc(shopId, 'products', product.id), {
     stock: increment(qty),
     updatedAt: serverTimestamp(),
   });
-  await logInventoryChange({
+  await logInventoryChange(shopId, {
     productId: product.id,
     productName: product.name,
     delta: qty,
@@ -53,13 +51,12 @@ export const restockProduct = async (product, qty, userId) => {
   });
 };
 
-export const adjustStock = async (product, delta, reason, userId) => {
-  if (!db) throw new Error('Firebase not configured');
-  await updateDoc(doc(db, 'products', product.id), {
+export const adjustStock = async (shopId, product, delta, reason, userId) => {
+  await updateDoc(shopDoc(shopId, 'products', product.id), {
     stock: increment(delta),
     updatedAt: serverTimestamp(),
   });
-  await logInventoryChange({
+  await logInventoryChange(shopId, {
     productId: product.id,
     productName: product.name,
     delta,
@@ -70,21 +67,21 @@ export const adjustStock = async (product, delta, reason, userId) => {
   });
 };
 
-export const subscribeInventoryLogs = (max = 100, callback) => {
-  if (!db) {
+export const subscribeInventoryLogs = (shopId, max = 100, callback) => {
+  if (!shopId) {
     callback([]);
     return () => {};
   }
-  const q = query(collection(db, COLL), orderBy('createdAt', 'desc'), limit(max));
+  const q = query(shopCol(shopId, COLL), orderBy('createdAt', 'desc'), limit(max));
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
 };
 
-export const fetchInventoryLogs = async (max = 200) => {
-  if (!db) return [];
+export const fetchInventoryLogs = async (shopId, max = 200) => {
+  if (!shopId) return [];
   const snap = await getDocs(
-    query(collection(db, COLL), orderBy('createdAt', 'desc'), limit(max))
+    query(shopCol(shopId, COLL), orderBy('createdAt', 'desc'), limit(max))
   );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };

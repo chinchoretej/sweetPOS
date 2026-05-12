@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { subscribeAuth, logoutUser } from '../services/authService';
+import { ROLES, isPlatformRole } from '../permissions/roles';
 
 const AuthContext = createContext(null);
 
@@ -20,7 +21,9 @@ export function AuthProvider({ children }) {
       user,
       loading,
       isAuthenticated: !!user,
-      isAdmin: user?.role === 'admin',
+      isSuperAdmin: user?.role === ROLES.SUPER_ADMIN,
+      isShopOwner: user?.role === ROLES.SHOP_OWNER,
+      isPlatformUser: isPlatformRole(user?.role),
       logout: async () => {
         await logoutUser();
         setUser(null);

@@ -8,6 +8,7 @@ import EmptyState from '../components/ui/EmptyState';
 import { TableRowSkeleton } from '../components/ui/Skeleton';
 import { subscribeRecentOrders } from '../services/orderService';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { formatCurrency, friendlyDate, toDate } from '../utils/format';
 import useDebounce from '../hooks/useDebounce';
 
@@ -19,6 +20,7 @@ const RANGES = [
 ];
 
 export default function Orders() {
+  const { shopId } = useTenant();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -28,12 +30,13 @@ export default function Orders() {
   const { settings } = useSettings();
 
   useEffect(() => {
-    const u = subscribeRecentOrders(500, (o) => {
+    if (!shopId) return;
+    const u = subscribeRecentOrders(shopId, 500, (o) => {
       setOrders(o);
       setLoading(false);
     });
     return () => u && u();
-  }, []);
+  }, [shopId]);
 
   const filtered = useMemo(() => {
     const term = debounced.trim().toLowerCase();

@@ -1,9 +1,9 @@
 {
   "name": "sweetpos",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "SweetPOS - Sweet Shop Billing & Stock Management PWA",
+  "description": "SweetPOS - Multi-tenant Sweet Shop SaaS (Billing, Inventory, Subscriptions)",
   "homepage": "https://chinchoretej.github.io/sweetPOS/",
   "scripts": {
     "dev": "vite",

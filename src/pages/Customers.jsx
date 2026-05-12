@@ -11,12 +11,14 @@ import {
 } from '../services/customerService';
 import { fetchOrdersByCustomer } from '../services/orderService';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { formatCurrency, friendlyDate } from '../utils/format';
 import useDebounce from '../hooks/useDebounce';
 import Button from '../components/ui/Button';
 import { useToast } from '../context/ToastContext';
 
 export default function Customers() {
+  const { shopId } = useTenant();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -30,12 +32,13 @@ export default function Customers() {
   const toast = useToast();
 
   useEffect(() => {
-    const u = subscribeCustomers((c) => {
+    if (!shopId) return;
+    const u = subscribeCustomers(shopId, (c) => {
       setCustomers(c);
       setLoading(false);
     });
     return () => u && u();
-  }, []);
+  }, [shopId]);
 
   const filtered = useMemo(() => {
     const term = debounced.trim().toLowerCase();
@@ -52,7 +55,7 @@ export default function Customers() {
     setActive(c);
     setActiveLoading(true);
     try {
-      const orders = await fetchOrdersByCustomer(c.mobile);
+      const orders = await fetchOrdersByCustomer(shopId, c.mobile);
       setActiveOrders(orders);
     } finally {
       setActiveLoading(false);
@@ -66,7 +69,7 @@ export default function Customers() {
       return;
     }
     try {
-      await upsertCustomer(draft);
+      await upsertCustomer(shopId, draft);
       toast.success('Customer saved');
       setCreateOpen(false);
       setDraft({ mobile: '', name: '', address: '' });

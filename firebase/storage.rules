@@ -1,27 +1,52 @@
 rules_version = '2';
+
+// SweetPOS multi-tenant storage rules.
+// All tenant artefacts (product images, etc.) live under shops/{shopId}/...
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function isSignedIn() {
-      return request.auth != null;
+    function isSignedIn() { return request.auth != null; }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isAdmin() {
-      return isSignedIn()
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    function role() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+          ? userDoc().role : '';
     }
 
-    // Product images: public read (so they show on receipts / dashboard),
-    // only admins can write.
-    match /products/{file=**} {
+    function userShopId() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+          ? userDoc().shopId : '';
+    }
+
+    function isSuperAdmin() { return role() == 'super_admin'; }
+
+    function isShopMember(shopId) {
+      return isSignedIn() && userShopId() == shopId;
+    }
+
+    function hasManageRole(shopId) {
+      return isShopMember(shopId) && role() in ['shop_owner', 'manager'];
+    }
+
+    // Product images and any other shop assets.
+    match /shops/{shopId}/{allPaths=**} {
+      // Public read so customers can see product photos in shared links.
       allow read: if true;
-      allow write: if isAdmin()
-        && request.resource.size < 2 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+      allow write: if isSuperAdmin() || hasManageRole(shopId);
     }
 
-    match /{path=**} {
+    // Public assets (logos etc.) – read-only.
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /{allPaths=**} {
       allow read, write: if false;
     }
   }

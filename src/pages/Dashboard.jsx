@@ -16,32 +16,29 @@ import Badge from '../components/ui/Badge';
 import { subscribeProducts } from '../services/productService';
 import { subscribeRecentOrders } from '../services/orderService';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { formatCurrency, friendlyDate, toDate } from '../utils/format';
 import { ROUTES } from '../constants/routes';
-import { seedSampleProducts } from '../utils/seedData';
-import { useToast } from '../context/ToastContext';
-import { isFirebaseConfigured } from '../services/firebase';
-import Button from '../components/ui/Button';
 
 export default function Dashboard() {
+  const { shopId, plan, daysRemaining } = useTenant();
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
   const { settings } = useSettings();
-  const toast = useToast();
 
   useEffect(() => {
+    if (!shopId) return;
     let pending = 2;
     const done = () => {
       pending -= 1;
       if (pending === 0) setLoading(false);
     };
-    const u1 = subscribeProducts((p) => {
+    const u1 = subscribeProducts(shopId, (p) => {
       setProducts(p);
       done();
     });
-    const u2 = subscribeRecentOrders(20, (o) => {
+    const u2 = subscribeRecentOrders(shopId, 20, (o) => {
       setOrders(o);
       done();
     });
@@ -49,7 +46,7 @@ export default function Dashboard() {
       u1 && u1();
       u2 && u2();
     };
-  }, []);
+  }, [shopId]);
 
   const stats = useMemo(() => {
     const today = new Date();
@@ -76,19 +73,6 @@ export default function Dashboard() {
     return { todaySales, monthSales, lowStock, topSelling };
   }, [orders, products, settings.lowStockThreshold]);
 
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      const result = await seedSampleProducts();
-      if (result.skipped) toast.info(result.message);
-      else toast.success(`Seeded ${result.count} sample products`);
-    } catch (err) {
-      toast.error(err.message || 'Seeding failed');
-    } finally {
-      setSeeding(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3 justify-between">
@@ -99,14 +83,15 @@ export default function Dashboard() {
             today.
           </p>
         </div>
-        <div className="flex gap-2">
-          {isFirebaseConfigured && products.length === 0 && !loading && (
-            <Button variant="secondary" onClick={handleSeed} loading={seeding} icon={<Sparkles className="w-4 h-4" />}>
-              Seed sample products
-            </Button>
+        <div className="flex flex-wrap gap-2">
+          {plan && (
+            <Badge tone="brand">
+              <Sparkles className="w-3 h-3 mr-1 inline" /> {plan.name}
+              {daysRemaining > 0 && ` • ${daysRemaining}d left`}
+            </Badge>
           )}
           <Link to={ROUTES.BILLING} className="btn-primary">
-            <Plus className="w-4 h-4" /> {`Quick Bill`}
+            <Plus className="w-4 h-4" /> Quick Bill
           </Link>
         </div>
       </div>

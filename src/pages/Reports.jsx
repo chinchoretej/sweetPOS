@@ -22,6 +22,7 @@ import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
 import { subscribeRecentOrders } from '../services/orderService';
 import { useSettings } from '../context/SettingsContext';
+import { useTenant } from '../context/TenantContext';
 import { formatCurrency, toDate } from '../utils/format';
 
 ChartJS.register(
@@ -55,18 +56,20 @@ const downloadCSV = (filename, rows) => {
 };
 
 export default function Reports() {
+  const { shopId } = useTenant();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState('30');
   const { settings } = useSettings();
 
   useEffect(() => {
-    const u = subscribeRecentOrders(1000, (o) => {
+    if (!shopId) return;
+    const u = subscribeRecentOrders(shopId, 1000, (o) => {
       setOrders(o);
       setLoading(false);
     });
     return () => u && u();
-  }, []);
+  }, [shopId]);
 
   const days = RANGE_DAYS[range] || 30;
 

@@ -32,6 +32,7 @@ import { createOrder, fetchOrder } from '../services/orderService';
 import { findCustomerByMobile } from '../services/customerService';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
+import { useTenant } from '../context/TenantContext';
 import { useToast } from '../context/ToastContext';
 import { formatCurrency } from '../utils/format';
 import { downloadInvoicePdf, printInvoiceWindow } from '../utils/invoice';
@@ -60,18 +61,20 @@ export default function Billing() {
 
   const { settings } = useSettings();
   const { user } = useAuth();
+  const { shopId } = useTenant();
   const toast = useToast();
 
   const cart = useCartStore();
   const totals = cart.totals();
 
   useEffect(() => {
-    const u = subscribeProducts((p) => {
+    if (!shopId) return;
+    const u = subscribeProducts(shopId, (p) => {
       setProducts(p);
       setLoading(false);
     });
     return () => u && u();
-  }, []);
+  }, [shopId]);
 
   useEffect(() => {
     if (settings) {
@@ -100,7 +103,7 @@ export default function Billing() {
       return;
     }
     try {
-      const c = await findCustomerByMobile(mobile);
+      const c = await findCustomerByMobile(shopId, mobile);
       if (c) {
         cart.setCustomer({ name: c.name || '', address: c.address || '' });
         toast.success(`Found returning customer: ${c.name || mobile}`);
@@ -131,7 +134,7 @@ export default function Billing() {
         price: Number(it.price),
         total: Number(it.total),
       }));
-      const result = await createOrder({
+      const result = await createOrder(shopId, {
         items,
         subtotal: totals.subtotal,
         discount: totals.discountAbs,
@@ -141,9 +144,10 @@ export default function Billing() {
         customer: cart.customer.mobile ? { ...cart.customer } : null,
         cashierId: user?.uid,
         notes: cart.notes,
+        invoicePrefix: settings.invoicePrefix || 'INV',
       });
 
-      const created = await fetchOrder(result.id);
+      const created = await fetchOrder(shopId, result.id);
       setSavedOrder(created || { ...result, items, total: totals.total, subtotal: totals.subtotal, discount: totals.discountAbs, gst: totals.gst, paymentMode: cart.paymentMode, customer: cart.customer, createdAt: new Date() });
       cart.reset();
       setPaymentOpen(false);

@@ -85,15 +85,18 @@ const SAMPLE_PRODUCTS = [
   },
 ];
 
-export const seedSampleProducts = async () => {
+export const seedSampleProducts = async (shopId) => {
   if (!db) throw new Error('Firebase not configured');
-  const existing = await getDocs(query(collection(db, 'products'), limit(1)));
+  if (!shopId) throw new Error('shopId required');
+  const path = collection(db, 'shops', shopId, 'products');
+  const existing = await getDocs(query(path, limit(1)));
   if (!existing.empty) return { skipped: true, message: 'Products already exist.' };
 
   await Promise.all(
     SAMPLE_PRODUCTS.map((p) =>
-      addDoc(collection(db, 'products'), {
+      addDoc(path, {
         ...p,
+        shopId,
         imageUrl: null,
         imagePath: null,
         soldCount: 0,
