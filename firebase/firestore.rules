@@ -67,6 +67,19 @@ service cloud.firestore {
         role() in ['shop_owner', 'manager', 'inventory_staff'];
     }
 
+    // Last 10 digits of the auth token's phone_number, e.g.
+    // "+919876543210" → "9876543210". Returns "" for non-phone users.
+    function authMobile() {
+      return isSignedIn()
+        && request.auth.token.phone_number is string
+        && request.auth.token.phone_number.size() >= 10
+        ? request.auth.token.phone_number[
+            request.auth.token.phone_number.size() - 10 :
+            request.auth.token.phone_number.size()
+          ]
+        : '';
+    }
+
     // ───────── users ─────────
     // A user can read/update their own profile (limited fields).
     // Super admin can do anything.
@@ -141,8 +154,24 @@ service cloud.firestore {
       }
 
       match /employees/{mobile} {
-        allow read: if isSuperAdmin() || hasManageRole(shopId);
-        allow create, update, delete: if isSuperAdmin() || isOwnerOf(shopId);
+        // Shop owners/managers see the directory. Plus: an authenticated
+        // phone-OTP user can read THEIR OWN invite (mobile == auth phone)
+        // so the bindUserToShopByMobile flow can locate it.
+        allow read: if isSuperAdmin() || hasManageRole(shopId) ||
+          (mobile == authMobile() && authMobile() != '');
+
+        allow create, delete: if isSuperAdmin() || isOwnerOf(shopId);
+
+        // Owner/manager can edit the invite freely. The invitee themselves
+        // can only mark it active and stamp their own uid — they cannot
+        // change role/shopId.
+        allow update: if isSuperAdmin() || hasManageRole(shopId) ||
+          (
+            mobile == authMobile() && authMobile() != '' &&
+            request.resource.data.role == resource.data.role &&
+            request.resource.data.shopId == resource.data.shopId &&
+            request.resource.data.mobile == resource.data.mobile
+          );
       }
 
       match /settings/{doc} {

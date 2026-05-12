@@ -8,8 +8,11 @@ import {
   onSnapshot,
   serverTimestamp,
   where,
+  collectionGroup,
+  doc,
 } from 'firebase/firestore';
-import { shopCol, shopDoc, USER, USERS } from './paths';
+import { db } from './firebase';
+import { shopCol, shopDoc, USER } from './paths';
 import { ROLES } from '../permissions/roles';
 import { logActivity } from './activityLogService';
 
@@ -91,41 +94,87 @@ export const removeEmployee = async (shopId, mobile, actorUid) => {
 };
 
 /**
- * Called from AuthContext when a phone-OTP user signs in.
- * Looks them up across all shops' employee directories and binds them.
- * If they're not in any shop, they remain unassigned.
+ * Find any pending employee invites for a given mobile across ALL shops.
+ * Uses a collectionGroup query — relies on a single-field collection-group
+ * index on the `mobile` field (configured in firebase/firestore.indexes.json).
+ */
+export const findInvitesByMobile = async (mobile) => {
+  const id = sanitizeMobile(mobile);
+  if (!id || !db) return [];
+  const snap = await getDocs(
+    query(collectionGroup(db, COLL), where('mobile', '==', id))
+  );
+  return snap.docs.map((d) => ({
+    ...d.data(),
+    _path: d.ref.path,
+    // d.ref.parent is the employees collection; .parent is the shop doc.
+    shopId: d.ref.parent.parent?.id || d.data().shopId,
+  }));
+};
+
+/**
+ * Auto-bind a freshly-authenticated phone-OTP user to a shop they were
+ * invited to. Idempotent and safe to call on every login.
+ *
+ * Rules:
+ *   - If the user already has a shopId, do nothing (don't move them).
+ *   - If the user is a super_admin, do nothing.
+ *   - Take the most recent invite if multiple exist.
+ *   - Stamp the user doc with the invite's shopId + role.
+ *   - Mark the invite doc as active and link the user's uid.
  */
 export const bindUserToShopByMobile = async (uid, mobile) => {
+  if (!uid || !db) return null;
   const id = sanitizeMobile(mobile);
   if (!id) return null;
 
-  // collectionGroup query is the production-correct way; for simplicity
-  // we use a top-level invite mirror under `users/{uid}.pendingInvite`
-  // when the super-admin invites by mobile. For shop-owner invitations
-  // (the common path), we resolve through the new `users/by-mobile/{id}`
-  // index doc that inviteEmployee maintains via Cloud Function in production.
-  // Here we accept either: a user already linked, or no shop.
   const userSnap = await getDoc(USER(uid));
-  if (userSnap.exists() && userSnap.data().shopId) return userSnap.data();
+  const userData = userSnap.exists() ? userSnap.data() : null;
 
-  // simple fallback: scan users collection for matching pendingInvite (small scale OK)
-  const inviteSnap = await getDocs(
-    query(USERS(), where('pendingInviteMobile', '==', id))
+  // Don't override an existing membership or super-admin role.
+  if (userData?.shopId) return null;
+  if (userData?.role === ROLES.SUPER_ADMIN) return null;
+
+  const invites = await findInvitesByMobile(id);
+  if (invites.length === 0) return null;
+
+  // Prefer the most recently created invite when there are multiples.
+  invites.sort((a, b) => {
+    const aT = a.createdAt?.toMillis?.() || 0;
+    const bT = b.createdAt?.toMillis?.() || 0;
+    return bT - aT;
+  });
+  const invite = invites[0];
+
+  // Bind the user → shop with the invited role.
+  await setDoc(
+    USER(uid),
+    {
+      uid,
+      shopId: invite.shopId,
+      role: invite.role || ROLES.CASHIER,
+      phone: id,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
   );
-  if (!inviteSnap.empty) {
-    const inv = inviteSnap.docs[0].data();
+
+  // Mark the invite as active. Done best-effort — if rules deny it (e.g.
+  // the user's auth token is missing the phone claim) we still consider
+  // the bind successful and just log a warning.
+  try {
     await setDoc(
-      USER(uid),
+      doc(db, invite._path),
       {
+        status: 'active',
         uid,
-        shopId: inv.shopId,
-        role: inv.role || ROLES.CASHIER,
-        phone: id,
-        updatedAt: serverTimestamp(),
+        acceptedAt: serverTimestamp(),
       },
       { merge: true }
     );
+  } catch (err) {
+    console.warn('[SweetPOS] could not mark invite active:', err.message);
   }
-  const updated = await getDoc(USER(uid));
-  return updated.exists() ? updated.data() : null;
+
+  return invite;
 };

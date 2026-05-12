@@ -9,6 +9,7 @@ import {
 import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { ROLES, normalizeLegacyRole } from '../permissions/roles';
+import { bindUserToShopByMobile } from './employeeService';
 
 const SUPER_ADMIN_EMAILS = (import.meta.env.VITE_SUPER_ADMIN_EMAILS || '')
   .split(',')
@@ -219,6 +220,17 @@ export const subscribeAuth = (callback) => {
       await ensureUserDoc(firebaseUser);
     } catch (err) {
       console.warn('[SweetPOS] user doc reconcile failed:', err.message);
+    }
+
+    // If they signed in via Mobile OTP and have no shop yet, see whether
+    // a shop owner has invited them. If so, attach them to that shop with
+    // the invited role.
+    if (firebaseUser.phoneNumber) {
+      try {
+        await bindUserToShopByMobile(firebaseUser.uid, firebaseUser.phoneNumber);
+      } catch (err) {
+        console.warn('[SweetPOS] employee bind failed:', err.message);
+      }
     }
 
     // Live-subscribe to the user doc so role / shopId changes

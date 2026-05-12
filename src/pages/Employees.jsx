@@ -209,8 +209,9 @@ export default function Employees() {
             options={ASSIGNABLE_EMPLOYEE_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
           />
           <p className="text-xs text-slate-500">
-            They will sign in via Mobile OTP. On first login their account will be auto-bound to
-            this shop with the chosen role.
+            They sign in at the same site URL via <strong>Mobile OTP</strong> with this number.
+            On their first login they&apos;ll be automatically bound to this shop with the
+            chosen role — no extra setup needed on their side.
           </p>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
