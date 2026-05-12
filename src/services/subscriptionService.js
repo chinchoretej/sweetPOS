@@ -2,13 +2,19 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  updateDoc,
   query,
   onSnapshot,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { SUBSCRIPTION, SUBSCRIPTIONS } from './paths';
-import { SUBSCRIPTION_STATUS, getBuiltinPlan, PLAN_IDS } from '../constants/plans';
+import { SUBSCRIPTION, SUBSCRIPTIONS, SHOP } from './paths';
+import {
+  SUBSCRIPTION_STATUS,
+  SHOP_STATUS,
+  getBuiltinPlan,
+  PLAN_IDS,
+} from '../constants/plans';
 import { logActivity } from './activityLogService';
 
 const toTs = (v) => (v instanceof Date ? Timestamp.fromDate(v) : v);
@@ -76,6 +82,27 @@ export const changePlan = async (shopId, newPlanId, actorUid, billingCycle = 'mo
     paymentStatus: newPlanId === PLAN_IDS.TRIAL ? 'n/a' : 'paid',
     lastPaidAt: newPlanId === PLAN_IDS.TRIAL ? null : Timestamp.fromDate(now),
   });
+
+  // Keep shop.status in sync with the plan, but never overwrite an
+  // explicit SUSPENDED / ARCHIVED status set by the platform owner.
+  try {
+    const shopSnap = await getDoc(SHOP(shopId));
+    if (shopSnap.exists()) {
+      const cur = shopSnap.data().status;
+      const patch = { planId: newPlanId, updatedAt: serverTimestamp() };
+      if (newPlanId === PLAN_IDS.TRIAL && cur === SHOP_STATUS.ACTIVE) {
+        patch.status = SHOP_STATUS.TRIAL;
+      } else if (
+        newPlanId !== PLAN_IDS.TRIAL &&
+        (cur === SHOP_STATUS.TRIAL || !cur)
+      ) {
+        patch.status = SHOP_STATUS.ACTIVE;
+      }
+      await updateDoc(SHOP(shopId), patch);
+    }
+  } catch (e) {
+    console.warn('[SweetPOS] failed to sync shop.status after plan change:', e.message);
+  }
 
   await logActivity({
     type: 'subscription.changed',

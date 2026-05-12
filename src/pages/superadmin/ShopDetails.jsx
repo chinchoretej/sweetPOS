@@ -40,6 +40,9 @@ export default function ShopDetails() {
   const [activity, setActivity] = useState([]);
   const [legacy, setLegacy] = useState(null);
   const [migrating, setMigrating] = useState(false);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [shopBusy, setShopBusy] = useState(false);
+  const [subBusy, setSubBusy] = useState(false);
 
   useEffect(() => {
     const u1 = subscribeShop(id, setShop);
@@ -55,22 +58,37 @@ export default function ShopDetails() {
     [plans]
   );
 
+  const currentPlan = useMemo(
+    () => plans.find((p) => p.id === sub?.planId),
+    [plans, sub?.planId]
+  );
+
   const handlePlanChange = async (e) => {
     const newPlan = e.target.value;
     if (!newPlan || newPlan === sub?.planId) return;
+    setPlanSaving(true);
     try {
       await changePlan(id, newPlan, user?.uid, sub?.billingCycle || 'monthly');
-      toast.success('Plan updated');
+      toast.success(`Plan changed to ${plans.find((p) => p.id === newPlan)?.name || newPlan}`);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Plan change failed');
+    } finally {
+      setPlanSaving(false);
     }
   };
 
   const toggleShopStatus = async () => {
     const next =
       shop?.status === SHOP_STATUS.SUSPENDED ? SHOP_STATUS.ACTIVE : SHOP_STATUS.SUSPENDED;
-    await setShopStatus(id, next, user?.uid);
-    toast.success(`Shop ${next}`);
+    setShopBusy(true);
+    try {
+      await setShopStatus(id, next, user?.uid);
+      toast.success(`Shop ${next === SHOP_STATUS.SUSPENDED ? 'suspended' : 'activated'}`);
+    } catch (err) {
+      toast.error(err.message || 'Could not update shop status');
+    } finally {
+      setShopBusy(false);
+    }
   };
 
   const toggleSubStatus = async () => {
@@ -78,8 +96,17 @@ export default function ShopDetails() {
       sub?.status === SUBSCRIPTION_STATUS.SUSPENDED
         ? SUBSCRIPTION_STATUS.ACTIVE
         : SUBSCRIPTION_STATUS.SUSPENDED;
-    await setSubscriptionStatus(id, next, user?.uid);
-    toast.success(`Subscription ${next}`);
+    setSubBusy(true);
+    try {
+      await setSubscriptionStatus(id, next, user?.uid);
+      toast.success(
+        `Subscription ${next === SUBSCRIPTION_STATUS.SUSPENDED ? 'suspended' : 'reactivated'}`
+      );
+    } catch (err) {
+      toast.error(err.message || 'Could not update subscription status');
+    } finally {
+      setSubBusy(false);
+    }
   };
 
   const runMigration = async () => {
@@ -118,10 +145,18 @@ export default function ShopDetails() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="card p-4 space-y-2">
           <h3 className="font-semibold">Shop</h3>
-          <Badge tone={SHOP_STATUS_TONE[shop.status] || 'default'}>{shop.status}</Badge>
+          <div className="flex flex-wrap gap-2">
+            <Badge tone={SHOP_STATUS_TONE[shop.status] || 'default'}>{shop.status}</Badge>
+            {currentPlan && <Badge tone="brand">Plan: {currentPlan.name}</Badge>}
+          </div>
           <p className="text-sm text-slate-500">Owner: {shop.ownerEmail || shop.ownerPhone}</p>
           <p className="text-sm text-slate-500">{shop.address || 'No address set'}</p>
-          <Button variant="secondary" onClick={toggleShopStatus} className="mt-2">
+          <Button
+            variant="secondary"
+            onClick={toggleShopStatus}
+            loading={shopBusy}
+            className="mt-2"
+          >
             {shop.status === SHOP_STATUS.SUSPENDED ? (
               <>
                 <Play className="w-4 h-4" /> Activate Shop
@@ -140,7 +175,14 @@ export default function ShopDetails() {
             <EmptyState title="No subscription record" description="Open the Subscriptions page." />
           ) : (
             <>
-              <Badge tone={sub.status === 'active' ? 'success' : 'warning'}>{sub.status}</Badge>
+              <div className="flex flex-wrap gap-2">
+                <Badge tone={sub.status === 'active' ? 'success' : 'warning'}>{sub.status}</Badge>
+                {currentPlan && (
+                  <Badge tone="brand">
+                    {currentPlan.name} · ₹{currentPlan.monthlyPrice}/mo
+                  </Badge>
+                )}
+              </div>
               <p className="text-sm text-slate-500">
                 Period ends: {friendlyDate(sub.currentPeriodEnd)} (
                 {daysRemaining(sub)} days)
@@ -150,9 +192,15 @@ export default function ShopDetails() {
                 label="Change Plan"
                 value={sub.planId || ''}
                 onChange={handlePlanChange}
+                disabled={planSaving}
                 options={planOptions}
               />
-              <Button variant="secondary" onClick={toggleSubStatus} icon={<RefreshCw className="w-4 h-4" />}>
+              <Button
+                variant="secondary"
+                onClick={toggleSubStatus}
+                loading={subBusy}
+                icon={<RefreshCw className="w-4 h-4" />}
+              >
                 {sub.status === SUBSCRIPTION_STATUS.SUSPENDED
                   ? 'Reactivate Subscription'
                   : 'Suspend Subscription'}
