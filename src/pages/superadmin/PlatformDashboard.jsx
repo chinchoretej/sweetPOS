@@ -83,10 +83,12 @@ export default function PlatformDashboard() {
     <div className="space-y-5">
       <div>
         <div className="flex items-center gap-2">
-          <Crown className="w-5 h-5 text-amber-500" />
-          <h2 className="text-2xl font-display font-bold">Platform Overview</h2>
+          <Crown className="w-5 h-5 text-amber-500 shrink-0" />
+          <h2 className="text-xl sm:text-2xl font-display font-bold truncate">
+            Platform Overview
+          </h2>
         </div>
-        <p className="text-sm text-slate-500">All your tenants at a glance.</p>
+        <p className="text-xs sm:text-sm text-slate-500">All your tenants at a glance.</p>
       </div>
 
       <LegacyMigrationCard shops={shops} />
@@ -109,7 +111,7 @@ export default function PlatformDashboard() {
           />
           <StatCard
             icon={<CreditCard className="w-5 h-5" />}
-            label="Active Subscriptions"
+            label="Active Subs"
             value={stats.activeSubs}
             accent="emerald"
           />
@@ -117,7 +119,7 @@ export default function PlatformDashboard() {
             icon={<IndianRupee className="w-5 h-5" />}
             label="MRR (est.)"
             value={`₹${Math.round(stats.monthlyRevenue).toLocaleString('en-IN')}`}
-            hint="Monthly recurring revenue"
+            hint="Monthly recurring"
             accent="amber"
           />
           <StatCard
@@ -130,12 +132,12 @@ export default function PlatformDashboard() {
       )}
 
       <div className="grid lg:grid-cols-3 gap-4">
-        <div className="card p-4 lg:col-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">Recent Shops</h3>
+        <div className="card p-3 sm:p-4 lg:col-span-2 overflow-hidden min-w-0">
+          <div className="flex items-center justify-between mb-3 gap-2">
+            <h3 className="font-semibold truncate">Recent Shops</h3>
             <Link
               to={ROUTES.ADMIN_SHOPS}
-              className="text-xs text-brand-600 hover:underline flex items-center gap-1"
+              className="text-xs text-brand-600 hover:underline flex items-center gap-1 shrink-0"
             >
               View all <ArrowRight className="w-3 h-3" />
             </Link>
@@ -145,39 +147,48 @@ export default function PlatformDashboard() {
           ) : shops.length === 0 ? (
             <EmptyState title="No shops yet" description="Once shops sign up they'll appear here." />
           ) : (
-            <table className="min-w-full text-sm">
-              <thead className="text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="py-2 text-left">Shop</th>
-                  <th className="py-2 text-left">Owner</th>
-                  <th className="py-2 text-left">Status</th>
-                  <th className="py-2 text-left">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {shops.slice(0, 6).map((s) => (
-                  <tr key={s.id}>
-                    <td className="py-2 font-medium">
-                      <Link
-                        to={`/admin/shops/${s.id}`}
-                        className="text-brand-600 hover:underline"
-                      >
-                        {s.name}
-                      </Link>
-                    </td>
-                    <td className="py-2 text-slate-500">{s.ownerEmail || s.ownerPhone || '—'}</td>
-                    <td className="py-2">
-                      <Badge tone={STATUS_TONE[s.status] || 'default'}>{s.status}</Badge>
-                    </td>
-                    <td className="py-2 text-slate-500">{friendlyDate(s.createdAt)}</td>
+            <div className="overflow-x-auto -mx-3 sm:-mx-4">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="text-[10px] sm:text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-2 sm:px-4 py-2 text-left">Shop</th>
+                    <th className="hidden sm:table-cell px-2 sm:px-4 py-2 text-left">Owner</th>
+                    <th className="px-2 sm:px-4 py-2 text-left">Status</th>
+                    <th className="hidden sm:table-cell px-2 sm:px-4 py-2 text-left">Created</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {shops.slice(0, 6).map((s) => (
+                    <tr key={s.id}>
+                      <td className="px-2 sm:px-4 py-2 font-medium max-w-[160px] sm:max-w-none">
+                        <Link
+                          to={`/admin/shops/${s.id}`}
+                          className="text-brand-600 hover:underline block truncate"
+                        >
+                          {s.name}
+                        </Link>
+                        <span className="block sm:hidden text-[10px] text-slate-500 truncate">
+                          {s.ownerEmail || s.ownerPhone || '—'} · {friendlyDate(s.createdAt)}
+                        </span>
+                      </td>
+                      <td className="hidden sm:table-cell px-2 sm:px-4 py-2 text-slate-500 max-w-[180px] truncate">
+                        {s.ownerEmail || s.ownerPhone || '—'}
+                      </td>
+                      <td className="px-2 sm:px-4 py-2">
+                        <Badge tone={STATUS_TONE[s.status] || 'default'}>{s.status}</Badge>
+                      </td>
+                      <td className="hidden sm:table-cell px-2 sm:px-4 py-2 text-slate-500">
+                        {friendlyDate(s.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        <div className="card p-4">
+        <div className="card p-3 sm:p-4 overflow-hidden min-w-0">
           <h3 className="font-semibold mb-3">Recent Activity</h3>
           {loading ? (
             <CardSkeleton />
@@ -186,9 +197,9 @@ export default function PlatformDashboard() {
           ) : (
             <ul className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
               {activity.map((a) => (
-                <li key={a.id} className="py-2">
-                  <p className="font-medium">{a.summary}</p>
-                  <p className="text-[11px] text-slate-500">
+                <li key={a.id} className="py-2 min-w-0">
+                  <p className="font-medium break-words">{a.summary}</p>
+                  <p className="text-[11px] text-slate-500 truncate">
                     {a.type} • {friendlyDate(a.createdAt)}
                   </p>
                 </li>

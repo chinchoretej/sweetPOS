@@ -84,17 +84,17 @@ export default function LegacyMigrationCard({ shops = [] }) {
   };
 
   return (
-    <div className="card p-4 border-amber-200 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10">
+    <div className="card p-3 sm:p-4 border-amber-200 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10 overflow-hidden min-w-0">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-200/70 dark:bg-amber-500/20 grid place-items-center text-amber-700 dark:text-amber-300">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="w-10 h-10 shrink-0 rounded-xl bg-amber-200/70 dark:bg-amber-500/20 grid place-items-center text-amber-700 dark:text-amber-300">
             <AlertTriangle className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="font-semibold text-amber-800 dark:text-amber-200">
               Legacy v1 data detected
             </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300 mt-0.5">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-0.5">
               {totalLegacyDocs} document{totalLegacyDocs === 1 ? '' : 's'} still live in
               top-level collections. Migrate them into a shop to make them visible in the
               new tenant-aware UI.
@@ -110,7 +110,11 @@ export default function LegacyMigrationCard({ shops = [] }) {
             </div>
           </div>
         </div>
-        <Button onClick={() => setOpen(true)} icon={<Wand2 className="w-4 h-4" />}>
+        <Button
+          onClick={() => setOpen(true)}
+          icon={<Wand2 className="w-4 h-4" />}
+          className="shrink-0 w-full sm:w-auto"
+        >
           Quick Migrate
         </Button>
       </div>
