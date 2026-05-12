@@ -13,13 +13,15 @@ export const fetchFeatureFlags = async (shopId) => {
   return snap.exists() ? snap.data() : null;
 };
 
-export const subscribeFeatureFlags = (shopId, callback) => {
+export const subscribeFeatureFlags = (shopId, callback, onError) => {
   if (!shopId) {
     callback(null);
     return () => {};
   }
-  return onSnapshot(FEATURE_FLAG(shopId), (snap) =>
-    callback(snap.exists() ? snap.data() : null)
+  return onSnapshot(
+    FEATURE_FLAG(shopId),
+    (snap) => callback(snap.exists() ? snap.data() : null),
+    onError
   );
 };
 

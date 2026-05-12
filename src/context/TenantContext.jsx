@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { subscribeShop } from '../services/shopService';
 import {
@@ -24,8 +24,16 @@ export function TenantProvider({ children }) {
   const [flagOverrides, setFlagOverrides] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Wire up tenant subscriptions when user has a shopId.
+  // Track per-listener "first fire" so we don't gate the UI on a
+  // listener that may legitimately resolve to null.
+  const shopReady = useRef(false);
+  const subReady = useRef(false);
+
   useEffect(() => {
+    // Reset per-user.
+    shopReady.current = false;
+    subReady.current = false;
+
     if (!user) {
       setShop(null);
       setSubscription(null);
@@ -36,7 +44,7 @@ export function TenantProvider({ children }) {
     }
 
     if (isPlatformRole(user.role)) {
-      // Super admin doesn't belong to one tenant.
+      // Super admin doesn't belong to one tenant — nothing to load.
       setShop(null);
       setSubscription(null);
       setPlan(null);
@@ -46,7 +54,7 @@ export function TenantProvider({ children }) {
     }
 
     if (!user.shopId) {
-      // Logged in but no shop yet → onboarding.
+      // Logged in but no shop yet → onboarding. Not loading.
       setShop(null);
       setSubscription(null);
       setPlan(null);
@@ -56,28 +64,67 @@ export function TenantProvider({ children }) {
     }
 
     setLoading(true);
+
+    const checkDone = () => {
+      if (shopReady.current && subReady.current) {
+        setLoading(false);
+      }
+    };
+
     const unsubs = [];
 
-    unsubs.push(subscribeShop(user.shopId, setShop));
-    unsubs.push(subscribeSubscription(user.shopId, setSubscription));
-    unsubs.push(subscribeFeatureFlags(user.shopId, setFlagOverrides));
+    unsubs.push(
+      subscribeShop(
+        user.shopId,
+        (s) => {
+          setShop(s);
+          shopReady.current = true;
+          checkDone();
+        },
+        (err) => {
+          console.warn('[SweetPOS] shop read failed:', err.message);
+          shopReady.current = true;
+          checkDone();
+        }
+      )
+    );
+
+    unsubs.push(
+      subscribeSubscription(
+        user.shopId,
+        (s) => {
+          setSubscription(s);
+          subReady.current = true;
+          checkDone();
+        },
+        (err) => {
+          console.warn('[SweetPOS] subscription read failed:', err.message);
+          subReady.current = true;
+          checkDone();
+        }
+      )
+    );
+
+    unsubs.push(
+      subscribeFeatureFlags(user.shopId, setFlagOverrides, (err) =>
+        console.warn('[SweetPOS] feature_flags read failed:', err.message)
+      )
+    );
 
     return () => unsubs.forEach((u) => u && u());
   }, [user]);
 
   // Plan: re-fetch whenever subscription.planId changes.
+  // Crucially this does NOT touch `loading` — features fall back to
+  // DEFAULT_FEATURES until the plan resolves.
   useEffect(() => {
     if (!subscription?.planId) {
       setPlan(null);
-      setLoading(false);
       return;
     }
     let active = true;
     fetchPlan(subscription.planId).then((p) => {
-      if (active) {
-        setPlan(p);
-        setLoading(false);
-      }
+      if (active) setPlan(p);
     });
     return () => {
       active = false;

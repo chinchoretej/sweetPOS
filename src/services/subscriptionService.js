@@ -14,12 +14,17 @@ import { logActivity } from './activityLogService';
 const toTs = (v) => (v instanceof Date ? Timestamp.fromDate(v) : v);
 
 export const upsertSubscription = async (shopId, data) => {
+  // Use a client-side `Date` for `startedAt` (then convert to Timestamp)
+  // so that `startedAt` and `currentPeriodEnd` always live in the same
+  // time domain. Mixing serverTimestamp() with a client-calculated
+  // `currentPeriodEnd` led to subtle expiry-math drift.
+  const started = data.startedAt instanceof Date ? data.startedAt : new Date();
   await setDoc(
     SUBSCRIPTION(shopId),
     {
       ...data,
       shopId,
-      startedAt: toTs(data.startedAt) ?? serverTimestamp(),
+      startedAt: toTs(data.startedAt) ?? Timestamp.fromDate(started),
       currentPeriodEnd: toTs(data.currentPeriodEnd),
       trialEndsAt: toTs(data.trialEndsAt) ?? null,
       updatedAt: serverTimestamp(),
@@ -34,13 +39,15 @@ export const fetchSubscription = async (shopId) => {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-export const subscribeSubscription = (shopId, callback) => {
+export const subscribeSubscription = (shopId, callback, onError) => {
   if (!shopId) {
     callback(null);
     return () => {};
   }
-  return onSnapshot(SUBSCRIPTION(shopId), (snap) =>
-    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+  return onSnapshot(
+    SUBSCRIPTION(shopId),
+    (snap) => callback(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    onError
   );
 };
 

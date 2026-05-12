@@ -154,13 +154,15 @@ export const fetchShop = async (shopId) => {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-export const subscribeShop = (shopId, callback) => {
+export const subscribeShop = (shopId, callback, onError) => {
   if (!shopId) {
     callback(null);
     return () => {};
   }
-  return onSnapshot(SHOP(shopId), (snap) =>
-    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+  return onSnapshot(
+    SHOP(shopId),
+    (snap) => callback(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    onError
   );
 };
 
