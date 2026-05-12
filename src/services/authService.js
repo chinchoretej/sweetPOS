@@ -107,14 +107,32 @@ export const adminLogin = async (email, password) => {
     await ensureUserDoc(cred.user, { role: 'admin' });
     return cred.user;
   } catch (err) {
-    // Auto-create admin if email is in allow-list and account does not exist
-    if (
-      err.code === 'auth/user-not-found' &&
-      ADMIN_EMAILS.includes(email.toLowerCase())
-    ) {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await ensureUserDoc(cred.user, { role: 'admin' });
-      return cred.user;
+    // Modern Firebase returns the same `auth/invalid-credential` for both
+    // "wrong password" and "user does not exist" (email-enumeration
+    // protection). For allow-listed admin emails we transparently create
+    // the account on first login. If the account already exists with a
+    // different password, surface a clear error.
+    const looksMissing =
+      err.code === 'auth/user-not-found' ||
+      err.code === 'auth/invalid-credential' ||
+      err.code === 'auth/invalid-login-credentials';
+
+    if (looksMissing && ADMIN_EMAILS.includes(email.toLowerCase())) {
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await ensureUserDoc(cred.user, { role: 'admin' });
+        return cred.user;
+      } catch (createErr) {
+        if (createErr.code === 'auth/email-already-in-use') {
+          throw new Error(
+            'Account exists but password is incorrect. Reset it from the Firebase console or use a different password.'
+          );
+        }
+        if (createErr.code === 'auth/weak-password') {
+          throw new Error('Password too weak — use at least 6 characters.');
+        }
+        throw createErr;
+      }
     }
     throw err;
   }
