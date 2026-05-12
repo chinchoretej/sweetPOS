@@ -1,16 +1,23 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Candy, Store, ShieldCheck, Sparkles } from 'lucide-react';
+import { Candy, Store, ShieldCheck, Sparkles, Crown } from 'lucide-react';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { createShop } from '../services/shopService';
+import { db } from '../services/firebase';
 import { ROUTES } from '../constants/routes';
 import { BUILTIN_PLANS, PLAN_IDS } from '../constants/plans';
 import { FEATURE_LABEL } from '../permissions/features';
-import { isPlatformRole } from '../permissions/roles';
+import { ROLES, isPlatformRole } from '../permissions/roles';
+
+const SUPER_ADMIN_EMAILS = (import.meta.env.VITE_SUPER_ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 export default function Onboarding() {
   const { user } = useAuth();
@@ -30,6 +37,34 @@ export default function Onboarding() {
   if (!user) return <Navigate to={ROUTES.LOGIN} replace />;
   if (isPlatformRole(user.role)) return <Navigate to={ROUTES.ADMIN_HOME} replace />;
   if (user.shopId) return <Navigate to={ROUTES.DASHBOARD} replace />;
+
+  const userEmail = (user.email || '').toLowerCase();
+  const isPotentialSuperAdmin =
+    !!userEmail && SUPER_ADMIN_EMAILS.includes(userEmail);
+
+  const claimSuperAdmin = async () => {
+    if (!db || !user.uid) return;
+    setSubmitting(true);
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          uid: user.uid,
+          email: user.email || null,
+          role: ROLES.SUPER_ADMIN,
+          shopId: null,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      toast.success('You are now Super Admin. Reloading…');
+      // Force a fresh auth state read so TenantGate routes us to /admin.
+      setTimeout(() => window.location.assign(ROUTES.ADMIN_HOME), 400);
+    } catch (err) {
+      toast.error(err.message || 'Could not claim super-admin role');
+      setSubmitting(false);
+    }
+  };
 
   const set = (k) => (e) => setShop((s) => ({ ...s, [k]: e.target.value }));
 
@@ -74,6 +109,32 @@ export default function Onboarding() {
             <p className="text-xs text-slate-500 mt-1">Let&apos;s get your shop ready</p>
           </div>
         </div>
+
+        {isPotentialSuperAdmin && (
+          <div className="card p-4 border-amber-200 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10 flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-200/70 dark:bg-amber-500/20 grid place-items-center text-amber-700 dark:text-amber-300">
+                <Crown className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-amber-800 dark:text-amber-200">
+                  You&apos;re on the Super Admin allow-list
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  Skip onboarding and go straight to the platform panel — you can create
+                  shops &amp; run the v1 migration from there.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={claimSuperAdmin}
+              loading={submitting}
+              icon={<Crown className="w-4 h-4" />}
+            >
+              Open Super Admin
+            </Button>
+          </div>
+        )}
 
         <div className="card p-2">
           <div className="grid grid-cols-2">
