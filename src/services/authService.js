@@ -186,8 +186,19 @@ export const subscribeAuth = (callback) => {
 
     let profile = null;
     if (db) {
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      profile = snap.exists() ? snap.data() : await ensureUserDoc(user);
+      // Always reconcile so that:
+      //   - newly added super-admin emails are promoted on next login
+      //   - legacy v1 'admin' role is migrated to v2 'shop_owner'/'super_admin'
+      //   - displayName / phone / email are kept in sync
+      try {
+        profile = await ensureUserDoc(user);
+      } catch (err) {
+        // If reconciliation fails (e.g. transient rule denial), fall back to
+        // whatever we currently have so the app doesn't lock the user out.
+        console.warn('[SweetPOS] user doc reconcile failed:', err.message);
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        profile = snap.exists() ? snap.data() : null;
+      }
     }
 
     callback({

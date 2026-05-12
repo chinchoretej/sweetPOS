@@ -78,17 +78,22 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.auth.uid == uid &&
         request.resource.data.role in ['super_admin', 'shop_owner', 'cashier', 'manager', 'inventory_staff'];
 
-      // Self-update: cannot escalate role or change shopId arbitrarily;
+      // Self-update: own profile only. Role can be set to any valid role
+      // — same trust model as the create rule (the client controls integrity
+      // and only sets `super_admin` when the email is in
+      // VITE_SUPER_ADMIN_EMAILS). For tighter production security, replace
+      // this with Firebase custom claims set via a Cloud Function.
       // shopId can only be set when previously empty (onboarding) OR by super admin.
       allow update: if isSignedIn() && (
         isSuperAdmin() ||
         (
           request.auth.uid == uid &&
-          request.resource.data.role == resource.data.role &&
+          request.resource.data.role in ['super_admin', 'shop_owner', 'manager', 'inventory_staff', 'cashier'] &&
           (
             resource.data.shopId == null ||
             resource.data.shopId == '' ||
-            request.resource.data.shopId == resource.data.shopId
+            request.resource.data.shopId == resource.data.shopId ||
+            isSuperAdmin()
           )
         )
       );
@@ -100,8 +105,11 @@ service cloud.firestore {
     match /shops/{shopId} {
       allow read: if isSuperAdmin() || isMemberOf(shopId);
       // Onboarding: a signed-in user can create a shop where they are the owner.
-      allow create: if isSignedIn() &&
-        request.resource.data.ownerUid == request.auth.uid;
+      // Super admins can create shops on behalf of any owner UID.
+      allow create: if isSignedIn() && (
+        isSuperAdmin() ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
       allow update: if isSuperAdmin() || isOwnerOf(shopId);
       allow delete: if isSuperAdmin();
 

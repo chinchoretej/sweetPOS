@@ -5,6 +5,7 @@ import { StatCard } from '../../components/ui/Card';
 import { CardSkeleton } from '../../components/ui/Skeleton';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
+import LegacyMigrationCard from '../../components/superadmin/LegacyMigrationCard';
 import { subscribeAllShops } from '../../services/shopService';
 import { subscribeAllSubscriptions } from '../../services/subscriptionService';
 import { subscribeRecentActivity } from '../../services/activityLogService';
@@ -87,6 +88,8 @@ export default function PlatformDashboard() {
         </div>
         <p className="text-sm text-slate-500">All your tenants at a glance.</p>
       </div>
+
+      <LegacyMigrationCard shops={shops} />
 
       {loading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

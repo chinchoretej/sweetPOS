@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { SHOPS, SHOP, USER } from './paths';
 import { SHOP_STATUS, SUBSCRIPTION_STATUS, getBuiltinPlan, PLAN_IDS } from '../constants/plans';
-import { ROLES } from '../permissions/roles';
+import { ROLES, isPlatformRole } from '../permissions/roles';
 import { upsertSubscription } from './subscriptionService';
 import { logActivity } from './activityLogService';
 
@@ -59,13 +59,19 @@ export const createShop = async ({
     createdBy,
   });
 
-  // Bind owner → shop
+  // Bind owner → shop. Preserve super_admin role if the owner is the
+  // platform owner creating a shop for themselves (common during
+  // first-time legacy v1 → v2 migration).
+  const ownerSnap = await getDoc(USER(ownerUid));
+  const existingRole = ownerSnap.exists() ? ownerSnap.data().role : null;
+  const ownerRole = isPlatformRole(existingRole) ? existingRole : ROLES.SHOP_OWNER;
+
   await setDoc(
     USER(ownerUid),
     {
       uid: ownerUid,
       shopId: ref.id,
-      role: ROLES.SHOP_OWNER,
+      role: ownerRole,
       updatedAt: serverTimestamp(),
     },
     { merge: true }
