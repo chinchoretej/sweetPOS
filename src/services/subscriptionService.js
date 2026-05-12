@@ -20,23 +20,34 @@ import { logActivity } from './activityLogService';
 const toTs = (v) => (v instanceof Date ? Timestamp.fromDate(v) : v);
 
 export const upsertSubscription = async (shopId, data) => {
-  // Use a client-side `Date` for `startedAt` (then convert to Timestamp)
-  // so that `startedAt` and `currentPeriodEnd` always live in the same
-  // time domain. Mixing serverTimestamp() with a client-calculated
-  // `currentPeriodEnd` led to subtle expiry-math drift.
-  const started = data.startedAt instanceof Date ? data.startedAt : new Date();
-  await setDoc(
-    SUBSCRIPTION(shopId),
-    {
-      ...data,
-      shopId,
-      startedAt: toTs(data.startedAt) ?? Timestamp.fromDate(started),
-      currentPeriodEnd: toTs(data.currentPeriodEnd),
-      trialEndsAt: toTs(data.trialEndsAt) ?? null,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  // Build the patch dynamically so we never send `undefined` to Firestore
+  // (Firestore rejects undefined; null is fine). This lets callers
+  // partially update the doc — e.g. just { status } — without wiping
+  // currentPeriodEnd / trialEndsAt.
+  const patch = {
+    ...data,
+    shopId,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (data.startedAt !== undefined) {
+    const started = data.startedAt instanceof Date ? data.startedAt : new Date();
+    patch.startedAt = toTs(data.startedAt) ?? Timestamp.fromDate(started);
+  }
+  if (data.currentPeriodEnd !== undefined) {
+    patch.currentPeriodEnd = toTs(data.currentPeriodEnd);
+  }
+  if (data.trialEndsAt !== undefined) {
+    patch.trialEndsAt = toTs(data.trialEndsAt);
+  }
+
+  // Strip any other accidentally-undefined fields that may have been
+  // spread in via `...data`.
+  Object.keys(patch).forEach((k) => {
+    if (patch[k] === undefined) delete patch[k];
+  });
+
+  await setDoc(SUBSCRIPTION(shopId), patch, { merge: true });
 };
 
 export const fetchSubscription = async (shopId) => {
