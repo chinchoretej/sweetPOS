@@ -6,7 +6,7 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { ROLES, normalizeLegacyRole } from '../permissions/roles';
 
@@ -181,35 +181,64 @@ export const subscribeAuth = (callback) => {
     callback(dev ? JSON.parse(dev) : null);
     return () => {};
   }
-  return onAuthStateChanged(auth, async (user) => {
-    if (!user) return callback(null);
 
-    let profile = null;
-    if (db) {
-      // Always reconcile so that:
-      //   - newly added super-admin emails are promoted on next login
-      //   - legacy v1 'admin' role is migrated to v2 'shop_owner'/'super_admin'
-      //   - displayName / phone / email are kept in sync
-      try {
-        profile = await ensureUserDoc(user);
-      } catch (err) {
-        // If reconciliation fails (e.g. transient rule denial), fall back to
-        // whatever we currently have so the app doesn't lock the user out.
-        console.warn('[SweetPOS] user doc reconcile failed:', err.message);
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        profile = snap.exists() ? snap.data() : null;
-      }
+  // Cleanup handle for the current Firestore profile listener; it gets
+  // swapped whenever the auth user changes.
+  let unsubProfile = null;
+  const buildPayload = (firebaseUser, profile) => ({
+    uid: firebaseUser.uid,
+    email: firebaseUser.email,
+    phoneNumber: firebaseUser.phoneNumber,
+    displayName: firebaseUser.displayName || profile?.displayName,
+    role: normalizeLegacyRole(profile?.role),
+    shopId: profile?.shopId || null,
+    status: profile?.status || 'active',
+    permissions: profile?.permissions || [],
+  });
+
+  const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+    // Tear down the previous profile listener whenever auth changes.
+    if (unsubProfile) {
+      unsubProfile();
+      unsubProfile = null;
     }
 
-    callback({
-      uid: user.uid,
-      email: user.email,
-      phoneNumber: user.phoneNumber,
-      displayName: user.displayName || profile?.displayName,
-      role: normalizeLegacyRole(profile?.role),
-      shopId: profile?.shopId || null,
-      status: profile?.status || 'active',
-      permissions: profile?.permissions || [],
-    });
+    if (!firebaseUser) {
+      callback(null);
+      return;
+    }
+
+    if (!db) {
+      callback(buildPayload(firebaseUser, null));
+      return;
+    }
+
+    // Reconcile (creates the doc on first login, promotes super admins,
+    // migrates legacy 'admin' → 'shop_owner').
+    try {
+      await ensureUserDoc(firebaseUser);
+    } catch (err) {
+      console.warn('[SweetPOS] user doc reconcile failed:', err.message);
+    }
+
+    // Live-subscribe to the user doc so role / shopId changes
+    // (e.g. post-onboarding, employee binding) propagate immediately
+    // without waiting for the next Firebase Auth event.
+    unsubProfile = onSnapshot(
+      doc(db, 'users', firebaseUser.uid),
+      (snap) => {
+        const profile = snap.exists() ? snap.data() : null;
+        callback(buildPayload(firebaseUser, profile));
+      },
+      (err) => {
+        console.warn('[SweetPOS] user doc snapshot failed:', err.message);
+        callback(buildPayload(firebaseUser, null));
+      }
+    );
   });
+
+  return () => {
+    if (unsubProfile) unsubProfile();
+    unsubAuth();
+  };
 };
